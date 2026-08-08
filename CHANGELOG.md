@@ -6,6 +6,12 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 Cada versão tem um instalador pronto em **[Releases](https://github.com/walterfr/UltraStarKaraokeMaker/releases)** — as notas de cada release trazem também as instruções de instalação.
 
+## [0.19.0] — 2026-08-08
+
+### Adicionado
+
+- **Trocar o tipo de nota (Normal/Golden/Freestyle) em lote, pro grupo selecionado.** Antes só dava pra mudar nota por nota. Contribuição de [@angelrdgzrivero](https://github.com/angelrdgzrivero) ([PR #13](https://github.com/walterfr/UltraStarKaraokeMaker/pull/13)).
+
 ## [0.18.5] — 2026-08-05
 
 ### Corrigido

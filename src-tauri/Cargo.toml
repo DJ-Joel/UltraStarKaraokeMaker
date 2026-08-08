@@ -1,6 +1,6 @@
 [package]
 name = "uskmaker"
-version = "0.18.5"
+version = "0.19.0"
 description = "USKMaker - gerador de pacotes de karaokê UltraStar com IA"
 edition = "2021"
 
