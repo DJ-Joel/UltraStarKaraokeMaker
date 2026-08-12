@@ -171,12 +171,22 @@ def get_audio_duration_seconds(path: Path) -> float:
     return info.frames / info.samplerate
 
 
-def convert_to_ogg(source_wav: Path, dest_ogg: Path, quality: int = 6,
-                   pitch_semitones: int = 0) -> None:
+# Vorbis -q:a (0-10, maior=melhor) -> libmp3lame -q:a (0-9, MENOR=melhor,
+# escala invertida). Só 2 níveis de qualidade existem hoje na pipeline
+# (6=pacote principal/stems ~192kbps, 8=export YARG ~256kbps) - mapeados
+# pela tabela de bitrate VBR do LAME, sem inventar fórmula pra caso que não
+# existe: q6->V2 (~190kbps), q8->V0 (~245kbps, teto do VBR do mp3).
+_VORBIS_TO_MP3_QUALITY = {6: 2, 8: 0}
+_MP3_QUALITY_FALLBACK = 2  # V2, se algum dia surgir um 3º nível não mapeado
+
+
+def convert_audio(source_wav: Path, dest: Path, audio_format: str = "ogg",
+                   quality: int = 6, pitch_semitones: int = 0) -> None:
     """
-    Converte um .wav para .ogg (Vorbis) via ffmpeg. quality 0-10 (VBR
-    libvorbis); 6 ~= 192kbps, bom equilíbrio qualidade/tamanho para karaoke.
-    Ambos UltraStar Deluxe e Play leem Ogg Vorbis nativamente.
+    Converte um .wav para .ogg (Vorbis) ou .mp3 (LAME) via ffmpeg, conforme
+    audio_format. quality é a escala do VORBIS (0-10, maior=melhor); quando
+    audio_format="mp3" ela é convertida via _VORBIS_TO_MP3_QUALITY. Ambos
+    UltraStar Deluxe e Play leem os dois formatos nativamente.
 
     pitch_semitones != 0 transpõe o áudio N semitons PRESERVANDO o tempo, via
     filtro rubberband (phase-vocoder de boa qualidade). Usado no "tom fixo":
@@ -187,7 +197,12 @@ def convert_to_ogg(source_wav: Path, dest_ogg: Path, quality: int = 6,
         # pitch é fator de escala; 2^(N/12) = N semitons na escala temperada.
         ratio = 2 ** (pitch_semitones / 12.0)
         cmd += ["-af", f"rubberband=pitch={ratio:.6f}"]
-    cmd += ["-c:a", "libvorbis", "-q:a", str(quality), str(dest_ogg)]
+    if audio_format == "mp3":
+        mp3_q = _VORBIS_TO_MP3_QUALITY.get(quality, _MP3_QUALITY_FALLBACK)
+        cmd += ["-c:a", "libmp3lame", "-q:a", str(mp3_q)]
+    else:
+        cmd += ["-c:a", "libvorbis", "-q:a", str(quality)]
+    cmd += [str(dest)]
     run_subprocess(cmd)
 
 
@@ -269,19 +284,22 @@ def write_song_ini(dest: Path, name: str, artist: str,
 def export_yarg(yarg_dir: Path, txt_path: Path, stems, source_audio: Path,
                 cover_path: Path | None, video_path: Path | None,
                 name: str, artist: str, year: int | None, genre: str | None,
-                transpose: int = 0) -> None:
+                transpose: int = 0, audio_format: str = "ogg") -> None:
     """
     Monta a pasta no layout do YARG. O YARG lê o UltraStar .txt NATIVAMENTE
     (ChartFormat.UltraStar) - não há conversão de formato, só empacotamento.
     O áudio vem dos STEMS (nomes reservados song/vocals), não da tag #MP3 do
-    .txt: song.ogg = instrumental (Demucs), vocals.ogg = vocal. Ambos os oggs
-    respeitam a transposição, para casar com as notas transpostas do notes.txt.
-    Q8/256kbps é o recomendado pela spec (o pacote UltraStar usa Q6).
+    .txt: song.<ext> = instrumental (Demucs), vocals.<ext> = vocal. Ambos
+    respeitam a transposição, para casar com as notas transpostas do
+    notes.txt. Quality 8 (~256kbps/V0) é o recomendado pela spec (o pacote
+    UltraStar principal usa quality 6).
     """
     yarg_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy(txt_path, yarg_dir / "notes.txt")
-    convert_to_ogg(stems.instrumental, yarg_dir / "song.ogg", quality=8, pitch_semitones=transpose)
-    convert_to_ogg(stems.vocals, yarg_dir / "vocals.ogg", quality=8, pitch_semitones=transpose)
+    convert_audio(stems.instrumental, yarg_dir / f"song.{audio_format}",
+                  audio_format=audio_format, quality=8, pitch_semitones=transpose)
+    convert_audio(stems.vocals, yarg_dir / f"vocals.{audio_format}",
+                  audio_format=audio_format, quality=8, pitch_semitones=transpose)
     if cover_path and cover_path.exists():
         shutil.copy(cover_path, yarg_dir / "album.jpg")
     if video_path and video_path.exists():
@@ -332,6 +350,8 @@ def run_pipeline(
     transpose: int = 0,
     yarg_export: bool = False,
     romanize: bool = False,
+    audio_format: str = "ogg",
+    max_video_resolution: int = 0,
 ):
     global _debug_log_path
 
@@ -385,7 +405,8 @@ def run_pipeline(
 
     console.rule("[bold cyan]Etapa 1/6 — Obtendo áudio fonte")
     debug_log("ETAPA 1 - iniciando get_source_audio")
-    source = get_source_audio(url, file, work_path / "raw", with_video=with_video)
+    source = get_source_audio(url, file, work_path / "raw", with_video=with_video,
+                               max_video_resolution=max_video_resolution)
     debug_log(f"ETAPA 1 - concluída. audio={source.audio_wav} video={source.video_path}")
     console.print(f"[green]OK[/green] Áudio em: {source.audio_wav}")
     if source.video_path:
@@ -730,7 +751,7 @@ def run_pipeline(
 
     console.rule("[bold cyan]Etapa 6/6 — Extraindo pitch e montando o .txt")
     debug_log("ETAPA 6 - iniciando build_song")
-    final_audio_name = f"{file_base}.ogg"
+    final_audio_name = f"{file_base}.{audio_format}"
     cover_filename = metadata.cover_path.name if metadata.cover_path else None
 
     # Background (#BACKGROUND): em camadas. Se o fanart.tv devolveu um fundo
@@ -771,10 +792,10 @@ def run_pipeline(
         debug_log("Convertendo stems separados para .ogg (with_stems=True)")
         console.print("[cyan]Convertendo faixas separadas (voz/instrumental)...[/cyan]")
         try:
-            vocals_filename = f"{file_base} [VOC].ogg"
-            instrumental_filename = f"{file_base} [INSTR].ogg"
-            convert_to_ogg(stems.vocals, out_path / vocals_filename)
-            convert_to_ogg(stems.instrumental, out_path / instrumental_filename)
+            vocals_filename = f"{file_base} [VOC].{audio_format}"
+            instrumental_filename = f"{file_base} [INSTR].{audio_format}"
+            convert_audio(stems.vocals, out_path / vocals_filename, audio_format=audio_format)
+            convert_audio(stems.instrumental, out_path / instrumental_filename, audio_format=audio_format)
             console.print(
                 f"[green]OK[/green] Faixas separadas no pacote: "
                 f"{vocals_filename} / {instrumental_filename}"
@@ -846,7 +867,7 @@ def run_pipeline(
     audio_src = stems.instrumental if backtrack else source.audio_wav
     debug_log(f"Convertendo áudio final para .ogg (backtrack={backtrack}, transpose={transpose}, fonte={audio_src})")
     final_audio_dest = out_path / final_audio_name
-    convert_to_ogg(audio_src, final_audio_dest, pitch_semitones=transpose)
+    convert_audio(audio_src, final_audio_dest, audio_format=audio_format, pitch_semitones=transpose)
     console.print(
         f"[green]OK[/green] Áudio {'(INSTRUMENTAL) ' if backtrack else ''}"
         f"{f'(TOM {transpose:+d}) ' if transpose else ''}convertido "
@@ -867,7 +888,7 @@ def run_pipeline(
                 yarg_dir, txt_path, stems, source.audio_wav,
                 metadata.cover_path, source.video_path,
                 title, artist, metadata.year, metadata.genre,
-                transpose=transpose,
+                transpose=transpose, audio_format=audio_format,
             )
             console.print(f"[green]OK[/green] Pasta YARG pronta: {yarg_dir}")
         except Exception as e:
@@ -941,6 +962,10 @@ if __name__ == "__main__":
         default=None,
         help="Arquivo .lrc (letra sincronizada, ex.: LRCLIB) para semear âncoras de início de linha",
     )
+    parser.add_argument("--audio-format", default="ogg", choices=["ogg", "mp3"],
+                        help="Formato de saída de todos os áudios do pacote")
+    parser.add_argument("--max-video-resolution", type=int, default=0,
+                        help="Teto de altura (px) do vídeo baixado com --with-video. 0 = sem limite")
     args = parser.parse_args()
 
     try:
@@ -966,6 +991,8 @@ if __name__ == "__main__":
             yarg_export=args.yarg_export,
             romanize=args.romanize,
             synced_lyrics_path=args.synced_lyrics,
+            audio_format=args.audio_format,
+            max_video_resolution=args.max_video_resolution,
         )
     except Exception:
         debug_log("EXCEÇÃO NÃO TRATADA:\n" + traceback.format_exc())

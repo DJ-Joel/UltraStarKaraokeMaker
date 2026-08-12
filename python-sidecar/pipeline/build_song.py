@@ -540,7 +540,7 @@ def build_song(
 
     # Tom fixo: transpõe a melodia inteira N semitons, uniforme, DEPOIS de toda
     # a estimativa/dobra de pitch. Casa com o áudio deslocado pelo mesmo N em
-    # convert_to_ogg (rubberband). Shift uniforme mantém intervalos e voicing.
+    # convert_audio (rubberband). Shift uniforme mantém intervalos e voicing.
     if transpose:
         for n in notes:
             n.pitch += transpose

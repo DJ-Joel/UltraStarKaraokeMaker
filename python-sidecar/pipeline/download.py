@@ -108,11 +108,16 @@ def download_from_youtube(url: str, out_dir: Path) -> Path:
     return audio_wav
 
 
-def download_from_youtube_with_video(url: str, out_dir: Path) -> SourceAudio:
+def download_from_youtube_with_video(url: str, out_dir: Path, max_resolution: int = 0) -> SourceAudio:
     """
     Baixa o VÍDEO do YouTube (preferindo mp4) UMA vez e extrai o áudio dele
     localmente via ffmpeg - assim há apenas UMA transferência de rede, em
     vez de baixar áudio e vídeo separadamente.
+
+    max_resolution > 0 limita a altura do vídeo baixado (mesma convenção do
+    download_background_video, que já usa isso) - sem teto, o yt-dlp pode
+    trazer 4K só pra virar fundo de karaokê, gastando banda/disco à toa.
+    0 = sem limite (comportamento anterior).
 
     Retorna SourceAudio com audio_wav E video_path preenchidos.
     """
@@ -129,8 +134,15 @@ def download_from_youtube_with_video(url: str, out_dir: Path) -> SourceAudio:
     # mp4 é o que o UltraStar lê melhor; se o YouTube só tiver webm, o yt-dlp
     # ainda entrega webm e o UltraStar moderno também lê, mas mp4 é o alvo
     # preferencial por compatibilidade máxima.
+    if max_resolution > 0:
+        video_format = (
+            f"bestvideo[ext=mp4][height<={max_resolution}]+bestaudio[ext=m4a]/"
+            f"best[ext=mp4][height<={max_resolution}]/best[height<={max_resolution}]"
+        )
+    else:
+        video_format = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
     cmd = _yt_dlp_base_cmd() + [
-        "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+        "-f", video_format,
         "--merge-output-format", "mp4",
         "-o", output_template,
         url,
@@ -233,6 +245,7 @@ def get_source_audio(
     file: str | None,
     out_dir: Path,
     with_video: bool = False,
+    max_video_resolution: int = 0,
 ) -> SourceAudio:
     """
     Ponto de entrada da etapa 1. Sempre retorna um SourceAudio.
@@ -240,13 +253,15 @@ def get_source_audio(
     with_video: só tem efeito para fonte YouTube. Quando True, baixa o vídeo
     e o inclui no resultado (para virar #VIDEO no pacote). Para fonte local
     (--file), não há vídeo a incluir e o flag é ignorado.
+    max_video_resolution: teto de altura (px) do vídeo, só usado com
+    with_video=True. 0 = sem limite.
     """
     if not url and not file:
         raise ValueError("Forneça --url (YouTube) ou --file (mp3/wav local).")
 
     if url:
         if with_video:
-            return download_from_youtube_with_video(url, out_dir)
+            return download_from_youtube_with_video(url, out_dir, max_resolution=max_video_resolution)
         return SourceAudio(audio_wav=download_from_youtube(url, out_dir))
 
     # fonte local: nunca há vídeo

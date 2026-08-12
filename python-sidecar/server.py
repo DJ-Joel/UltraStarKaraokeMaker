@@ -15,7 +15,7 @@ PROTOCOLO
      "language":..., "out_dir":..., "bpm":..., "gap_ms":..., "device":...,
      "with_video":..., "bg_video":..., "bg_video_url":..., "clean_work":...,
      "with_stems":..., "duet":..., "backtrack":..., "transpose":..., "yarg_export":..., "romanize":...,
-     "synced_lyrics_path":...}
+     "synced_lyrics_path":..., "audio_format":..., "max_video_resolution":...}
     {"cmd":"shutdown"}  -> encerra o servidor.
 
   Conclusão (out_dir/_job_status.json, escrito ao fim de cada job):
@@ -88,6 +88,8 @@ def _run_one(job: dict) -> None:
                     yarg_export=job.get("yarg_export", False),
                     romanize=job.get("romanize", False),
                     synced_lyrics_path=job.get("synced_lyrics_path"),
+                    audio_format=job.get("audio_format", "ogg"),
+                    max_video_resolution=job.get("max_video_resolution", 0),
                 )
             status_path.write_text(json.dumps({"status": "ok"}), encoding="utf-8")
         except Exception as e:

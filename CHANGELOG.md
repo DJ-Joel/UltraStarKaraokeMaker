@@ -6,6 +6,12 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 Cada versão tem um instalador pronto em **[Releases](https://github.com/walterfr/UltraStarKaraokeMaker/releases)** — as notas de cada release trazem também as instruções de instalação.
 
+## [0.20.0] — 2026-08-12
+
+### Adicionado
+
+- **Formato do áudio (OGG/MP3) e teto de resolução do vídeo baixado, configuráveis.** Antes o áudio de todo pacote saía sempre em OGG e o vídeo (quando incluído) baixava na melhor resolução disponível, sem limite (podia vir 4K). Agora dá pra escolher MP3 como formato — aplica em todo áudio gerado (pacote principal, faixas separadas e export YARG) — e limitar a resolução do vídeo, com **1080p como novo padrão** (quem não mexer na config passa a baixar vídeo mais leve; formato de áudio continua OGG por padrão). Pedido de usuário.
+
 ## [0.19.0] — 2026-08-08
 
 ### Adicionado

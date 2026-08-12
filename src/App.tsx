@@ -116,6 +116,8 @@ interface PersistedSettings {
   backtrack: boolean;
   yargExport: boolean;
   romanize: boolean;
+  audioFormat: "ogg" | "mp3";
+  maxVideoResolution: number;
 }
 
 function loadSettings(): Partial<PersistedSettings> {
@@ -245,6 +247,8 @@ function App() {
   const [backtrack, setBacktrack] = useState(saved.backtrack ?? false);
   const [yargExport, setYargExport] = useState(saved.yargExport ?? false);
   const [romanize, setRomanize] = useState(saved.romanize ?? false);
+  const [audioFormat, setAudioFormat] = useState<"ogg" | "mp3">(saved.audioFormat ?? "ogg");
+  const [maxVideoResolution, setMaxVideoResolution] = useState(saved.maxVideoResolution ?? 1080);
   const [outDir, setOutDir] = useState(saved.outDir ?? "");
 
   // Letra sincronizada (.lrc) do LRCLIB: guardada crua e enviada ao pipeline,
@@ -339,9 +343,9 @@ function App() {
 
   // ------------------------------------------------ persistência leve
   useEffect(() => {
-    const settings: PersistedSettings = { sourceMode, language, outDir, withVideo, bgVideo, cleanWork, cleanExtras, withStems, duet, backtrack, yargExport, romanize };
+    const settings: PersistedSettings = { sourceMode, language, outDir, withVideo, bgVideo, cleanWork, cleanExtras, withStems, duet, backtrack, yargExport, romanize, audioFormat, maxVideoResolution };
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-  }, [sourceMode, language, outDir, withVideo, bgVideo, cleanWork, cleanExtras, withStems, duet, backtrack, yargExport, romanize]);
+  }, [sourceMode, language, outDir, withVideo, bgVideo, cleanWork, cleanExtras, withStems, duet, backtrack, yargExport, romanize, audioFormat, maxVideoResolution]);
 
   // ------------------------------------------------ SÓ EM DEV: preview de estado
   // Abre a UI num estado simulado sem precisar do backend Tauri, para inspecionar
@@ -638,6 +642,8 @@ function App() {
       transpose: parseInt(transpose, 10) || 0,
       yargExport,
       romanize,
+      audioFormat,
+      maxVideoResolution: sourceMode === "youtube" && withVideo ? maxVideoResolution : 0,
     };
   }
 
@@ -964,7 +970,7 @@ function App() {
   if (env) {
     if (!env.sidecarOk) envProblems.push(env.sidecarMsg);
     if (!env.ffmpegOk) envProblems.push(t("envNoFfmpeg"));
-    else if (!env.vorbisOk) envProblems.push(t("envNoVorbis"));
+    else if (audioFormat === "ogg" && !env.vorbisOk) envProblems.push(t("envNoVorbis"));
   }
 
   const minutes = Math.floor(elapsed / 60);
@@ -1132,6 +1138,23 @@ function App() {
             {t("withVideoLabel")}
             <span className="tip-mark" aria-hidden="true">?</span>
           </label>
+          {withVideo && (
+            <label title={t("maxVideoResolutionHint")}>
+              {t("maxVideoResolutionLabel")}
+              <span className="tip-mark" aria-hidden="true">?</span>
+              <select
+                value={String(maxVideoResolution)}
+                onChange={(e) => setMaxVideoResolution(parseInt(e.target.value, 10))}
+                disabled={isRunning}
+              >
+                {[480, 720, 1080, 1440, 2160, 0].map((r) => (
+                  <option key={r} value={String(r)}>
+                    {r === 0 ? t("maxVideoResolutionUncapped") : `${r}p`}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
         </div>
       ) : (
         <div className="field-group">
@@ -1283,6 +1306,20 @@ function App() {
                 {n === 0 ? t("transposeOriginal") : `${n > 0 ? "+" : ""}${n}`}
               </option>
             ))}
+          </select>
+        </div>
+        <div className="field-group">
+          <label title={t("audioFormatHint")}>
+            {t("audioFormatLabel")}
+            <span className="tip-mark" aria-hidden="true">?</span>
+          </label>
+          <select
+            value={audioFormat}
+            onChange={(e) => setAudioFormat(e.target.value as "ogg" | "mp3")}
+            disabled={isRunning}
+          >
+            <option value="ogg">OGG (Vorbis)</option>
+            <option value="mp3">MP3</option>
           </select>
         </div>
       </div>

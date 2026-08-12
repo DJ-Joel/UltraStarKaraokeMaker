@@ -227,6 +227,22 @@ struct PipelineInput {
     /// Opt-in; o alinhamento roda sobre o japonês original. Opt-in.
     #[serde(default)]
     romanize: bool,
+    /// Formato de saída de TODOS os áudios do pacote (principal + stems +
+    /// export YARG). "ogg" (padrão/histórico) ou "mp3". Default do Rust fica
+    /// em "ogg" só como rede de segurança pra JSON antigo sem o campo - o
+    /// padrão de produto mora no estado inicial do React.
+    #[serde(default = "default_audio_format")]
+    audio_format: String,
+    /// Teto de altura (px) do vídeo baixado com with_video. 0 = sem limite
+    /// (default do Rust deliberadamente 0, não 1080: preserva o comportamento
+    /// ANTIGO pra qualquer job sem o campo - o padrão de produto de 1080 mora
+    /// no estado inicial do React, não aqui).
+    #[serde(default)]
+    max_video_resolution: i64,
+}
+
+fn default_audio_format() -> String {
+    "ogg".to_string()
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -580,6 +596,8 @@ async fn run_pipeline(
         "yarg_export": input.yarg_export,
         "romanize": input.romanize,
         "synced_lyrics_path": synced_path.as_ref().map(|p| p.to_string_lossy().to_string()),
+        "audio_format": input.audio_format,
+        "max_video_resolution": input.max_video_resolution,
     });
     let job_line = serde_json::to_string(&job)
         .map_err(|e| tr_err(lang, "job_serialize", &e))?;
