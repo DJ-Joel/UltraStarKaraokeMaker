@@ -260,6 +260,15 @@ export default function ReviewScreen({ outDir, onClose }: Props) {
 
   const PIANO_ROLL_W = 92;
 
+  // Fecha o AudioContext do piano roll ao desmontar - sem isso, cada vez que
+  // a tela de revisão abre/fecha na mesma sessão sobra um contexto de áudio
+  // vivo (o navegador tem teto de contextos simultâneos).
+  useEffect(() => {
+    return () => {
+      pianoAudioRef.current?.close();
+    };
+  }, []);
+
   songRef.current = song;
   selectedRef.current = selected;
   multiSelectedRef.current = multiSelected;
@@ -1650,8 +1659,8 @@ export default function ReviewScreen({ outDir, onClose }: Props) {
           </button>
         ))}
         <span className="toolbar-sep" />
-        <button onClick={addNote} title="Add note">
-          + Note
+        <button onClick={addNote} title={t("revAddNoteTitle")}>
+          {t("revAddNote")}
         </button>
         <button onClick={undo} title="Ctrl+Z">
           {t("revUndo")}
