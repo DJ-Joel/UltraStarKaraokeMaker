@@ -11,6 +11,7 @@ Cada versão tem um instalador pronto em **[Releases](https://github.com/walterf
 ### Adicionado
 
 - **Formato do áudio (OGG/MP3) e teto de resolução do vídeo baixado, configuráveis.** Antes o áudio de todo pacote saía sempre em OGG e o vídeo (quando incluído) baixava na melhor resolução disponível, sem limite (podia vir 4K). Agora dá pra escolher MP3 como formato — aplica em todo áudio gerado (pacote principal, faixas separadas e export YARG) — e limitar a resolução do vídeo, com **1080p como novo padrão** (quem não mexer na config passa a baixar vídeo mais leve; formato de áudio continua OGG por padrão). Pedido de usuário.
+- **Notas Rap/GoldenRap na tela de revisão**, distintas de Freestyle (cantos quadrados na visualização pra diferenciar). **Botão "+ Nota" (atalho `N`)** para criar uma nota manualmente na posição do marcador de tempo, respeitando a ordem cronológica. **Piano roll lateral tocável**, sincronizado com a nota selecionada — referência de pitch durante a revisão. **Corrigido:** mover/redimensionar notas pelo teclado (setas/Shift+setas) com um grupo multi-selecionado só mexia numa nota — agora mexe no grupo inteiro, igual o arraste já fazia. Contribuição de [@mur1nu](https://github.com/mur1nu) ([PR #14](https://github.com/walterfr/UltraStarKaraokeMaker/pull/14)).
 
 ## [0.19.0] — 2026-08-08
 

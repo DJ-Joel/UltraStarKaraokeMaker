@@ -11,6 +11,7 @@ Every version has a ready-to-use installer on **[Releases](https://github.com/wa
 ### Added
 
 - **Configurable output audio format (OGG/MP3) and a max resolution cap for the downloaded video.** Previously every package's audio was always OGG, and the video (when included) downloaded at the best available resolution, uncapped (could come in at 4K). You can now choose MP3 — applied to every audio file the package generates (main audio, separated stems, and YARG export) — and cap the video resolution, with **1080p as the new default** (anyone who doesn't touch the setting now downloads a lighter video; audio format still defaults to OGG). User request.
+- **Rap/GoldenRap note types in the review screen**, distinct from Freestyle (square corners in the visualization to tell them apart). **"+ Note" button (shortcut `N`)** to manually create a note at the time-marker position, keeping notes chronologically ordered. **Playable piano roll sidebar**, synced with the selected note — a handy pitch reference while reviewing. **Fixed:** moving/resizing notes with the keyboard (arrows/Shift+arrows) while a group was multi-selected only affected one note — it now moves the whole group, matching how dragging already worked. Contributed by [@mur1nu](https://github.com/mur1nu) ([PR #14](https://github.com/walterfr/UltraStarKaraokeMaker/pull/14)).
 
 ## [0.19.0] — 2026-08-08
 
