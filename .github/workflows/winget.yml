@@ -3,10 +3,14 @@ name: Publish to Winget
 # Roda quando um release é publicado: atualiza o manifesto do walterfr.USKMaker
 # no microsoft/winget-pkgs via wingetcreate (abre PR lá automaticamente).
 #
-# Também aceita disparo manual (workflow_dispatch) - usado SÓ para a 1ª
-# submissão (bootstrap: `wingetcreate submit` do manifesto local em
-# packaging/winget/, que CRIA o pacote lá). Depois de existir, todo release
-# novo usa o caminho automático (`wingetcreate update`).
+# Também aceita disparo manual (workflow_dispatch), com dois usos:
+#   1. Bootstrap (manifest_path preenchido): `wingetcreate submit` do
+#      manifesto local em packaging/winget/, que CRIA o pacote lá - só
+#      necessário na 1ª vez (feito em 04/08, PR microsoft/winget-pkgs#412424).
+#   2. Catch-up (catchup_version preenchido): roda o MESMO `wingetcreate
+#      update` do caminho automático, pra releases que saíram ENQUANTO o
+#      bootstrap ainda não tinha mesclado (o update falha até o pacote
+#      existir lá - aconteceu em v0.18.5/v0.19.0/v0.20.0, ver CHANGELOG).
 #
 # Precisa do secret WINGET_TOKEN: um GitHub PAT (classic, escopo public_repo)
 # da conta que vai abrir o fork/PR no microsoft/winget-pkgs.
@@ -17,9 +21,13 @@ on:
   workflow_dispatch:
     inputs:
       manifest_path:
-        description: "Pasta do manifesto local pra 1ª submissão (bootstrap)"
-        required: true
-        default: "packaging/winget/manifests/w/walterfr/USKMaker/0.18.4"
+        description: "Bootstrap: pasta do manifesto local pra 1ª submissão (deixe vazio se não for bootstrap)"
+        required: false
+        default: ""
+      catchup_version:
+        description: "Catch-up: versão (ex.: 0.20.0) pra atualizar o winget manualmente (deixe vazio se não for catch-up)"
+        required: false
+        default: ""
 
 jobs:
   publish:
@@ -29,18 +37,22 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
 
       - name: Bootstrap - submit local manifest (1ª vez só)
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && inputs.manifest_path != ''
         shell: pwsh
         run: |
           Invoke-WebRequest -Uri "https://aka.ms/wingetcreate/latest" -OutFile wingetcreate.exe
           .\wingetcreate.exe submit "${{ inputs.manifest_path }}" --token "${{ secrets.WINGET_TOKEN }}"
 
-      - name: Update winget manifest and submit PR (release novo)
-        if: github.event_name == 'release'
+      - name: Update winget manifest and submit PR (release novo ou catch-up manual)
+        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.catchup_version != '')
         shell: pwsh
         run: |
-          $version = "${{ github.event.release.tag_name }}".TrimStart('v')
-          $url = "https://github.com/walterfr/UltraStarKaraokeMaker/releases/download/${{ github.event.release.tag_name }}/USKMaker_${version}_x64-setup.exe"
+          if ("${{ github.event_name }}" -eq "release") {
+            $version = "${{ github.event.release.tag_name }}".TrimStart('v')
+          } else {
+            $version = "${{ inputs.catchup_version }}".TrimStart('v')
+          }
+          $url = "https://github.com/walterfr/UltraStarKaraokeMaker/releases/download/v${version}/USKMaker_${version}_x64-setup.exe"
           Invoke-WebRequest -Uri "https://aka.ms/wingetcreate/latest" -OutFile wingetcreate.exe
           .\wingetcreate.exe update walterfr.USKMaker `
             --version $version `
