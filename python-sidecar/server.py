@@ -118,6 +118,7 @@ def _run_one(job: dict) -> None:
                     transpose=job.get("transpose", 0),
                     yarg_export=job.get("yarg_export", False),
                     mp4_export=job.get("mp4_export", _mp4_export_fallback()),
+                    whisper_model=job.get("whisper_model", "auto"),
                     romanize=job.get("romanize", False),
                     synced_lyrics_path=job.get("synced_lyrics_path"),
                     audio_format=job.get("audio_format", "ogg"),

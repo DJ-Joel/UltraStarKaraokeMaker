@@ -228,6 +228,10 @@ struct PipelineInput {
     /// sem o jogo. Opt-in (é o passo mais lento depois da IA).
     #[serde(default)]
     mp4_export: bool,
+    /// Modelo de reconhecimento usado no alinhamento: "auto" (escolhe pela
+    /// VRAM), "medium" (rápido) ou "large-v3" (mais preciso em música densa).
+    #[serde(default = "default_whisper_model")]
+    whisper_model: String,
     /// Romanizar: reescreve o texto das notas em romaji (para letras japonesas).
     /// Opt-in; o alinhamento roda sobre o japonês original. Opt-in.
     #[serde(default)]
@@ -244,6 +248,10 @@ struct PipelineInput {
     /// no estado inicial do React, não aqui).
     #[serde(default)]
     max_video_resolution: i64,
+}
+
+fn default_whisper_model() -> String {
+    "auto".to_string()
 }
 
 fn default_audio_format() -> String {
@@ -600,6 +608,7 @@ async fn run_pipeline(
         "transpose": input.transpose,
         "yarg_export": input.yarg_export,
         "mp4_export": input.mp4_export,
+        "whisper_model": input.whisper_model,
         "romanize": input.romanize,
         "synced_lyrics_path": synced_path.as_ref().map(|p| p.to_string_lossy().to_string()),
         "audio_format": input.audio_format,

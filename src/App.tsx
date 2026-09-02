@@ -116,6 +116,7 @@ interface PersistedSettings {
   backtrack: boolean;
   yargExport: boolean;
   mp4Export: boolean;
+  whisperModel: string;
   romanize: boolean;
   audioFormat: "ogg" | "mp3";
   maxVideoResolution: number;
@@ -248,6 +249,7 @@ function App() {
   const [backtrack, setBacktrack] = useState(saved.backtrack ?? false);
   const [yargExport, setYargExport] = useState(saved.yargExport ?? false);
   const [mp4Export, setMp4Export] = useState(saved.mp4Export ?? false);
+  const [whisperModel, setWhisperModel] = useState<string>(saved.whisperModel ?? "auto");
   const [romanize, setRomanize] = useState(saved.romanize ?? false);
   const [audioFormat, setAudioFormat] = useState<"ogg" | "mp3">(saved.audioFormat ?? "ogg");
   const [maxVideoResolution, setMaxVideoResolution] = useState(saved.maxVideoResolution ?? 1080);
@@ -345,9 +347,9 @@ function App() {
 
   // ------------------------------------------------ persistência leve
   useEffect(() => {
-    const settings: PersistedSettings = { sourceMode, language, outDir, withVideo, bgVideo, cleanWork, cleanExtras, withStems, duet, backtrack, yargExport, mp4Export, romanize, audioFormat, maxVideoResolution };
+    const settings: PersistedSettings = { sourceMode, language, outDir, withVideo, bgVideo, cleanWork, cleanExtras, withStems, duet, backtrack, yargExport, mp4Export, whisperModel, romanize, audioFormat, maxVideoResolution };
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-  }, [sourceMode, language, outDir, withVideo, bgVideo, cleanWork, cleanExtras, withStems, duet, backtrack, yargExport, mp4Export, romanize, audioFormat, maxVideoResolution]);
+  }, [sourceMode, language, outDir, withVideo, bgVideo, cleanWork, cleanExtras, withStems, duet, backtrack, yargExport, mp4Export, whisperModel, romanize, audioFormat, maxVideoResolution]);
 
   // ------------------------------------------------ SÓ EM DEV: preview de estado
   // Abre a UI num estado simulado sem precisar do backend Tauri, para inspecionar
@@ -644,6 +646,7 @@ function App() {
       transpose: parseInt(transpose, 10) || 0,
       yargExport,
       mp4Export,
+      whisperModel,
       romanize,
       audioFormat,
       maxVideoResolution: sourceMode === "youtube" && withVideo ? maxVideoResolution : 0,
@@ -1312,6 +1315,18 @@ function App() {
           </select>
         </div>
         <div className="field-group">
+          <label title={t("whisperModelHint")}>
+            {t("whisperModelLabel")}
+            <select
+              value={whisperModel}
+              onChange={(e) => setWhisperModel(e.target.value)}
+              disabled={isRunning}
+            >
+              <option value="auto">{t("whisperAuto")}</option>
+              <option value="medium">{t("whisperFast")}</option>
+              <option value="large-v3">{t("whisperBest")}</option>
+            </select>
+          </label>
           <label title={t("audioFormatHint")}>
             {t("audioFormatLabel")}
             <span className="tip-mark" aria-hidden="true">?</span>

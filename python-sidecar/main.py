@@ -166,6 +166,59 @@ def resolve_device(requested: str) -> str:
     return "cpu"
 
 
+# Modelo do Whisper usado no alinhamento.
+#
+# POR QUE ISTO VIROU UMA OPÇÃO (relato real, 02/09/2026 - "Camouflage - The
+# Great Commandment"): o tamanho estava FIXO em "medium", como default de
+# parâmetro do align_lyrics_to_audio, e não era exposto em lugar nenhum -
+# nem CLI, nem servidor, nem interface. Toda música do mundo usava "medium".
+#
+# Naquele caso o Whisper reconheceu 50% das palavras; abaixo disso as âncoras
+# começam a cair na sílaba errada e o que está entre elas é esticado pra caber.
+# O log AVISOU ("reconhecimento da letra ficou baixo"), a pipeline tentou dois
+# resgates e os dois pioraram - mas não havia nenhuma alavanca pra puxar.
+# Música densa, voz processada, banda alemã cantando em inglês: é exatamente o
+# terreno onde um modelo maior ouve mais palavras.
+#
+# O "large-v3" pede ~3 GB de VRAM em float16 contra ~1,6 GB do "medium" - o
+# projeto nasceu numa RTX 4060 de 8 GB, onde "medium" era a escolha prudente,
+# mas a folga existe em qualquer placa moderna.
+WHISPER_MODEL_DEFAULT = "medium"
+WHISPER_MODEL_BEST = "large-v3"
+
+# VRAM (em GB) a partir da qual o "auto" escolhe o modelo grande. 6 GB é
+# deliberadamente folgado: o large-v3 usa ~3 GB, e a margem cobre o
+# fragmento que o torch já mantém reservado. Abaixo disso, "medium" - melhor
+# um alinhamento razoável que um estouro de memória no meio da música.
+WHISPER_LARGE_MIN_VRAM_GB = 6.0
+
+
+def resolve_whisper_model(requested: str, device: str) -> str:
+    """
+    Traduz a escolha do usuário no nome real do modelo.
+
+    "auto" (padrão) olha a VRAM: placa com folga usa o modelo grande, o resto
+    segue no "medium" de antes. Assim quem tem GPU boa ganha precisão sem
+    pedir nada, e nenhuma máquina modesta passa a estourar memória - a
+    correção não pode piorar quem já estava funcionando.
+
+    Na CPU é SEMPRE "medium": o large-v3 na CPU levaria dezenas de minutos por
+    música, o que na prática é o mesmo que travar.
+    """
+    if requested and requested not in ("auto", ""):
+        return requested
+    if device != "cuda":
+        return WHISPER_MODEL_DEFAULT
+    try:
+        import torch
+        vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+        if vram_gb >= WHISPER_LARGE_MIN_VRAM_GB:
+            return WHISPER_MODEL_BEST
+    except Exception:
+        pass
+    return WHISPER_MODEL_DEFAULT
+
+
 def get_audio_duration_seconds(path: Path) -> float:
     """Lê só o cabeçalho do áudio (rápido, não carrega o arquivo inteiro)."""
     info = sf.info(str(path))
@@ -351,6 +404,7 @@ def run_pipeline(
     transpose: int = 0,
     yarg_export: bool = False,
     mp4_export: bool = False,
+    whisper_model: str = "auto",
     romanize: bool = False,
     audio_format: str = "ogg",
     max_video_resolution: int = 0,
@@ -453,8 +507,12 @@ def run_pipeline(
 
     console.rule("[bold cyan]Etapa 4/6 — Alinhando letra ao áudio (WhisperX, âncora+interpolação)")
     debug_log("ETAPA 4 - iniciando align_lyrics_to_audio")
+    whisper_model_size = resolve_whisper_model(whisper_model, device)
+    debug_log(f"ETAPA 4 - modelo Whisper: {whisper_model_size} (pedido: {whisper_model})")
+    console.print(f"[cyan]Modelo de reconhecimento:[/cyan] {whisper_model_size}")
     word_timings = align_lyrics_to_audio(
         stems.vocals, Path(lyrics_path), language=language, device=device,
+        whisper_model_size=whisper_model_size,
         synced_lyrics_path=Path(synced_lyrics_path) if synced_lyrics_path else None,
     )
     debug_log(f"ETAPA 4 - concluída. {len(word_timings)} palavras")
@@ -491,6 +549,7 @@ def run_pipeline(
             lead_vocals = isolate_lead_vocal(stems.vocals, work_path / "lead_vocal")
             retry_timings = align_lyrics_to_audio(
                 lead_vocals, Path(lyrics_path), language=language, device=device,
+                whisper_model_size=whisper_model_size,
                 synced_lyrics_path=Path(synced_lyrics_path) if synced_lyrics_path else None,
             )
             retry_interp = alignment_stats(retry_timings)["by_source"]["interpolated"]
@@ -547,6 +606,7 @@ def run_pipeline(
         try:
             vad_retry_timings = align_lyrics_to_audio(
                 stems.vocals, Path(lyrics_path), language=language, device=device,
+                whisper_model_size=whisper_model_size,
                 synced_lyrics_path=Path(synced_lyrics_path) if synced_lyrics_path else None,
                 vad_options={"vad_onset": 0.3, "vad_offset": 0.2},
             )
@@ -608,6 +668,7 @@ def run_pipeline(
             stems2 = separate_vocals(source.audio_wav, work_path / "stems_retry", device=device)
             retry_timings = align_lyrics_to_audio(
                 stems2.vocals, Path(lyrics_path), language=language, device=device,
+                whisper_model_size=whisper_model_size,
                 synced_lyrics_path=Path(synced_lyrics_path) if synced_lyrics_path else None,
             )
             retry_interp = alignment_stats(retry_timings)["by_source"]["interpolated"]
@@ -1001,6 +1062,9 @@ if __name__ == "__main__":
     parser.add_argument("--backtrack", action="store_true", help="Backtrack: o áudio do pacote é o INSTRUMENTAL (sem voz-guia), karaokê puro")
     parser.add_argument("--transpose", type=int, default=0, help="Transpõe o pacote N semitons (áudio via rubberband + pitches das notas). 0 = tom original")
     parser.add_argument("--yarg-export", action="store_true", help="Exporta também uma subpasta no layout do YARG (notes.txt + song.ini + stems song.ogg/vocals.ogg)")
+    parser.add_argument("--whisper-model", default="auto",
+                        choices=["auto", "medium", "large-v3", "large-v2", "small"],
+                        help="Modelo de reconhecimento do alinhamento. auto = large-v3 em GPU com VRAM sobrando, senão medium")
     parser.add_argument("--mp4-export", action="store_true", help="Renderiza também um vídeo de karaokê '<base> (Karaoke).mp4' (letra sincronizada gravada por cima do fundo)")
     parser.add_argument("--romanize", action="store_true", help="Reescreve o texto das notas em romaji (Hepburn) via pykakasi - para letras japonesas")
     parser.add_argument(
@@ -1036,6 +1100,7 @@ if __name__ == "__main__":
             transpose=args.transpose,
             yarg_export=args.yarg_export,
             mp4_export=args.mp4_export,
+            whisper_model=args.whisper_model,
             romanize=args.romanize,
             synced_lyrics_path=args.synced_lyrics,
             audio_format=args.audio_format,
