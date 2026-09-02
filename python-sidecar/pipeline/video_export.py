@@ -174,6 +174,22 @@ def notes_to_syllables(notes: list[Note], bpm: float, gap_ms: float) -> list[Syl
         if is_continuation and syllables:
             # só estende a sílaba anterior: o preenchimento continua correndo
             syllables[-1].end_s = max(syllables[-1].end_s, end)
+
+            # ...MAS o espaço de FIM DE PALAVRA tem que sobreviver.
+            #
+            # BUG REAL (relatado com print, 02/09/2026: "beenlonelysince",
+            # "missyou", "Oh,and"): pela convenção do build_song.py, o espaço
+            # que separa duas palavras é grudado na ÚLTIMA nota da palavra -
+            # e essa última nota pode ser justamente uma continuação de
+            # melisma, cujo texto vira "~ " (til MAIS espaço). Descartar a
+            # nota inteira levava o espaço junto, e as duas palavras
+            # apareciam coladas na tela.
+            #
+            # Confirmado nos dados reais do usuário: 'let' + '~ ' + 'the ' -
+            # sem isto, sai "letthe". O til em si nunca é exibido (é notação
+            # de pitch); o espaço ao lado dele é texto de verdade.
+            if text.endswith((" ", "\t")) and not syllables[-1].text.endswith(" "):
+                syllables[-1].text += " "
             continue
         if is_continuation:
             continue  # "~" órfão no começo da linha: nada a estender, descarta
@@ -257,7 +273,11 @@ def line_to_karaoke_text(syllables: list[Syllable],
         duration_cs = max(1, int(round((stop - syl.start_s) * 100)))
         if i in wrap_at:
             parts.append("\\N")
-        parts.append("{\\kf%d}%s" % (duration_cs, ass_escape(syl.text)))
+        # A sílaba que FECHA uma linha visual perde o espaço final. O texto é
+        # centralizado: um espaço pendurado no fim conta na largura e empurra
+        # a linha inteira para a esquerda do centro. Some da tela mas desloca.
+        text = syl.text.rstrip() if (i + 1) in wrap_at else syl.text
+        parts.append("{\\kf%d}%s" % (duration_cs, ass_escape(text)))
     return "".join(parts)
 
 

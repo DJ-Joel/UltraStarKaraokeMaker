@@ -427,3 +427,67 @@ def test_rerender_sem_audio_explica_o_motivo(tmp_path, monkeypatch):
     with _pytest.raises(FileNotFoundError) as exc:
         rerender_from_folder(tmp_path)
     assert "sumiu.mp3" in str(exc.value)
+
+
+# ---------------------------------------------------------------------------
+# Espaço de fim de palavra em nota de continuação
+# ---------------------------------------------------------------------------
+
+def test_REGRESSAO_palavras_nao_grudam_quando_o_melisma_carrega_o_espaco():
+    """
+    BUG REAL (print do usuário, 02/09/2026): "beenlonelysince", "missyou",
+    "Oh,and" - palavras coladas na tela, com a letra digitada CERTA.
+
+    Pela convenção do build_song.py, o espaço que separa duas palavras é
+    grudado na ÚLTIMA nota da palavra. Quando essa última nota é uma
+    continuação de melisma, seu texto é "~ " - til MAIS espaço. Descartar a
+    nota inteira (por ser "~") levava o espaço junto.
+
+    Padrão exato tirado dos dados reais do usuário:
+        'miss' + '~ ' + 'you, '   ->  tem que virar "miss you, "
+    """
+    notes = [_note(0, 8, "miss"), _note(8, 8, "~ "), _note(16, 8, "you, ")]
+    texto = "".join(s.text for s in notes_to_syllables(notes, 240.0, 0))
+    assert texto == "miss you, ", f"saiu {texto!r}"
+    assert "missyou" not in texto
+
+
+def test_continuacao_sem_espaco_nao_inventa_um():
+    """
+    "~" no MEIO de uma palavra (sustentação de uma sílaba interna) não tem
+    espaço nenhum - inventar um partiria a palavra em duas.
+    """
+    notes = [_note(0, 8, "lo"), _note(8, 8, "~"), _note(16, 8, "nely ")]
+    assert "".join(s.text for s in notes_to_syllables(notes, 240.0, 0)) == "lonely "
+
+
+def test_nao_duplica_espaco_ja_existente():
+    notes = [_note(0, 8, "been "), _note(8, 8, "~ "), _note(16, 8, "lonely ")]
+    assert "".join(s.text for s in notes_to_syllables(notes, 240.0, 0)) == "been lonely "
+
+
+def test_varias_continuacoes_o_espaco_da_ultima_conta():
+    """Sustentação longa vira vários "~"; só o último carrega o fim da palavra."""
+    notes = [_note(0, 8, "been"), _note(8, 8, "~"), _note(16, 8, "~"),
+             _note(24, 8, "~ "), _note(32, 8, "lonely ")]
+    assert "".join(s.text for s in notes_to_syllables(notes, 240.0, 0)) == "been lonely "
+
+
+def test_o_til_nunca_aparece_na_tela():
+    """O "~" é notação de pitch; só o espaço ao lado dele é texto de verdade."""
+    notes = [_note(0, 8, "miss"), _note(8, 8, "~ "), _note(16, 8, "you ")]
+    assert "~" not in "".join(s.text for s in notes_to_syllables(notes, 240.0, 0))
+
+
+def test_silaba_que_fecha_linha_visual_nao_leva_espaco_pendurado():
+    """
+    Texto centralizado: um espaço no fim da linha conta na largura e empurra
+    a linha para a esquerda do centro. Invisível, mas desalinha.
+    """
+    # sílabas longas o bastante para estourar MAX_CHARS_PER_LINE e forçar
+    # uma quebra de verdade - senão o teste passa sem testar nada
+    syls = [Syllable("aaaaaaaaaaaa ", 0, 1), Syllable("bbbbbbbbbbbb ", 1, 2),
+            Syllable("cccccccccccc ", 2, 3), Syllable("dddddddddddd ", 3, 4)]
+    txt = line_to_karaoke_text(syls, 0.0)
+    assert " \\N" not in txt, txt
+    assert "\\N" in txt          # e a quebra continua existindo
