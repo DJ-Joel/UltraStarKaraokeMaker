@@ -1,4 +1,4 @@
-# USKMaker - setup do ambiente de IA (rode uma vez apos instalar o app)
+﻿# USKMaker - setup do ambiente de IA (rode uma vez apos instalar o app)
 #
 # Pode ser disparado de duas formas:
 #   - pelo BOTAO "Configurar ambiente de IA" dentro do app (passa -Unattended);
@@ -111,8 +111,29 @@ if (Test-Path $uvExe) {
 }
 
 # ---------------------------------------------------------------------------
-# 3. Detectar GPU NVIDIA (escolhe o build do torch: CUDA cu126 ou CPU)
+# 3. Detectar GPU NVIDIA (escolhe o build do torch: CUDA cu128, cu126 ou CPU)
 # ---------------------------------------------------------------------------
+#
+# NAO BASTA saber que HA uma GPU NVIDIA - o build do torch precisa conter os
+# kernels da GERACAO dela. Cada build do CUDA cobre um conjunto de "compute
+# capabilities" (sm_XX), e uma placa mais NOVA que o build simplesmente nao
+# tem codigo pra executar.
+#
+# BUG REAL (relatado por usuario de RTX 5080, 02/09/2026): a Blackwell
+# (serie RTX 50, sm_120) so ganhou kernels a partir do CUDA 12.8. Com o
+# cu126 fixo que este script usava, o usuario baixava 2,5 GB de CUDA e o
+# pipeline caia pra CPU do mesmo jeito - e o resolve_device do main.py, que
+# compara a capacidade real contra torch.cuda.get_arch_list(), fazia a coisa
+# CERTA (fallback pra CPU em vez de estourar "no kernel image is available"),
+# mas sem que ninguem entendesse por que a placa nova nao era usada.
+#
+# `nvidia-smi --query-gpu=compute_cap` devolve a capacidade direto (ex.:
+# "12.0"), sem heuristica em cima do nome comercial da placa - nome de
+# marketing nao diz geracao de forma confiavel.
+#
+# A regra e CONSERVADORA de proposito: so a partir de 12.0 muda pro cu128.
+# Placa antiga continua exatamente no caminho de antes, entao esta correcao
+# nao pode regredir quem ja estava funcionando.
 Write-Step "Detectando GPU NVIDIA"
 
 $hasNvidia = $false
@@ -122,8 +143,32 @@ try {
 } catch { }
 
 if ($hasNvidia) {
-    Write-Ok "GPU NVIDIA detectada - torch com CUDA (cu126)."
-    $torchIndex = "https://download.pytorch.org/whl/cu126"
+    # Capacidade da placa. Driver antigo pode nao conhecer o campo
+    # compute_cap; nesse caso $computeCap fica vazio e caimos no cu126 de
+    # antes - o comportamento historico, seguro.
+    $computeCap = ""
+    try {
+        $capRaw = & nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>$null
+        if ($LASTEXITCODE -eq 0 -and $capRaw) {
+            $computeCap = ($capRaw | Select-Object -First 1).ToString().Trim()
+        }
+    } catch { }
+
+    $capNumber = 0.0
+    if ($computeCap -match '^\d+(\.\d+)?$') {
+        $capNumber = [double]::Parse($computeCap, [System.Globalization.CultureInfo]::InvariantCulture)
+    }
+
+    if ($capNumber -ge 12.0) {
+        Write-Ok "GPU NVIDIA Blackwell ou mais nova detectada (compute $computeCap) - torch com CUDA (cu128)."
+        $torchIndex = "https://download.pytorch.org/whl/cu128"
+    } elseif ($capNumber -gt 0) {
+        Write-Ok "GPU NVIDIA detectada (compute $computeCap) - torch com CUDA (cu126)."
+        $torchIndex = "https://download.pytorch.org/whl/cu126"
+    } else {
+        Write-Warn2 "GPU NVIDIA detectada, mas nao consegui ler a compute capability - usando cu126 (padrao)."
+        $torchIndex = "https://download.pytorch.org/whl/cu126"
+    }
 } else {
     Write-Warn2 "Nenhuma GPU NVIDIA detectada - torch CPU (funciona, mas ~10 min por musica)."
     $torchIndex = "https://download.pytorch.org/whl/cpu"
@@ -236,7 +281,13 @@ if ($cudaExit -ne 0) {
 }
 $cudaCheck = ($cudaOut | Where-Object { $_ -match '^(True|False)$' } | Select-Object -Last 1)
 if ($hasNvidia -and $cudaCheck -ne "True") {
-    Write-Warn2 "GPU NVIDIA detectada mas o torch nao esta enxergando CUDA (verifique o driver)."
+    # Mensagem antiga culpava o driver do usuario. Quase nunca era o driver:
+    # era o torch de CPU instalado por deteccao falha, ou um build de CUDA sem
+    # os kernels da placa. Apontar os dois suspeitos reais poupa muito tempo.
+    Write-Warn2 "GPU NVIDIA detectada mas o torch nao esta enxergando CUDA."
+    Write-Warn2 "  Suspeitos, nesta ordem: (1) foi instalado um torch de CPU"
+    Write-Warn2 "  (rode este script de novo com a GPU visivel ao nvidia-smi);"
+    Write-Warn2 "  (2) o build de CUDA nao cobre a geracao da placa; (3) driver."
 } else {
     Write-Ok "torch instalado (CUDA disponivel: $cudaCheck)"
 }

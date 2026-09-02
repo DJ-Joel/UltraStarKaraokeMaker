@@ -140,6 +140,97 @@ def test_duracao_vai_ate_o_inicio_da_proxima_silaba():
     assert "{\\kf200}ab " in line_to_karaoke_text(syls)
 
 
+def _parse_dialogue(line: str) -> tuple[float, str]:
+    """('0:00:01.50', texto) -> (1.5, texto). Só para os testes."""
+    campos = line.split(",", 9)
+    h, m, s = campos[1].split(":")
+    return int(h) * 3600 + int(m) * 60 + float(s), campos[9]
+
+
+def _quando_cada_silaba_acende(dialogue_line: str) -> list[float]:
+    """
+    Reconstrói o horário ABSOLUTO (em segundos, no relógio da música) em que
+    cada sílaba começa a ser preenchida - que é o que o espectador vê.
+
+    É a leitura de um PLAYER de verdade: no ASS as durações de karaokê são
+    relativas ao INÍCIO DO EVENTO, então o relógio parte do Start do Dialogue
+    e vai acumulando as tags na ordem. É justamente essa acumulação que o bug
+    do adiantamento quebrava.
+    """
+    import re
+    inicio, texto = _parse_dialogue(dialogue_line)
+    relogio = inicio
+    acendem: list[float] = []
+    for tag, centesimos in re.findall(r"\{\\(k|kf)(\d+)\}", texto):
+        if tag == "kf":              # sílaba visível: marca quando acende
+            acendem.append(round(relogio, 2))
+        relogio += int(centesimos) / 100.0
+    return acendem
+
+
+def test_silabas_acendem_no_tempo_REAL_da_nota():
+    """
+    REGRESSÃO DO BUG DE 02/09/2026 (letra ~3 s adiantada a música inteira).
+
+    Este é o teste que faltava. Os antigos conferiam as durações e o início do
+    evento separadamente - ambos certos - sem nunca checar a RELAÇÃO entre os
+    dois, que era onde o erro estava. Aqui reconstruímos o horário absoluto em
+    que cada sílaba acende, do jeito que um player faz, e comparamos com o
+    tempo real da nota.
+
+    O GAP não-nulo é essencial: com #GAP 0 (como quase todos os testes antigos
+    usavam) o erro fica pequeno e passa despercebido.
+    """
+    BPM, GAP = 240.0, 3000          # canto começa 3 s depois do início da faixa
+    notes = [_note(0, 8, "Pri"), _note(8, 8, "mei"), _note(16, 8, "ra "),
+             _note(96, 8, "Se"), _note(104, 8, "gun"), _note(112, 8, "da ")]
+    song = _song(notes, [2, 5], bpm=BPM, gap_ms=GAP)
+
+    esperado = [beat_to_seconds(n["start_beat"] if isinstance(n, dict)
+                                else n.start_beat, BPM, GAP) for n in notes]
+
+    principais = [l for l in build_ass(song).splitlines()
+                  if l.startswith("Dialogue:") and ",Main," in l]
+    medido = [t for l in principais for t in _quando_cada_silaba_acende(l)]
+
+    assert len(medido) == len(esperado), (medido, esperado)
+    for got, want in zip(medido, esperado):
+        assert abs(got - want) <= 0.02, (
+            f"sílaba acende em {got:.2f}s, deveria acender em {want:.2f}s "
+            f"(adiantada {want - got:+.2f}s)"
+        )
+
+
+def test_primeira_silaba_nao_acende_no_aparecimento_da_linha():
+    """
+    Guarda direta e legível do mesmo bug: a linha aparece ANTES para dar tempo
+    de ler, então o preenchimento NÃO pode começar junto com ela.
+    """
+    song = _song([_note(0, 8, "ola "), _note(8, 8, "mundo")], [1],
+                 bpm=240.0, gap_ms=3000)
+    linha = [l for l in build_ass(song).splitlines() if ",Main," in l][0]
+    aparece, _ = _parse_dialogue(linha)
+    acende = _quando_cada_silaba_acende(linha)[0]
+
+    assert acende > aparece, "o preenchimento começou junto com a linha"
+    assert abs(acende - 3.0) < 0.02, f"deveria acender em 3,00 s, acendeu em {acende:.2f} s"
+
+
+def test_espera_do_lead_in_e_emitida_como_tag_sem_texto():
+    """A pausa é um {\\k...} sem texto na frente - a forma idiomática do ASS."""
+    song = _song([_note(0, 8, "oi")], [0], bpm=240.0, gap_ms=3000)
+    linha = [l for l in build_ass(song).splitlines() if ",Main," in l][0]
+    assert "{\\k220}{\\kf" in linha
+
+
+def test_sem_lead_in_nenhum_nao_emite_espera():
+    """Linha que aparece exatamente quando é cantada não ganha pausa à toa."""
+    # com GAP 0 a 1ª linha aparece em 0,00 e é cantada em 0,00
+    song = _song([_note(0, 8, "ja")], [0], bpm=240.0, gap_ms=0)
+    linha = [l for l in build_ass(song).splitlines() if ",Main," in l][0]
+    assert "{\\k0}" not in linha and linha.split(",,")[-1].startswith("{\\kf")
+
+
 def test_ultima_silaba_usa_o_proprio_fim():
     syls = [Syllable("fim", 0.0, 1.0)]
     assert line_to_karaoke_text(syls) == "{\\kf100}fim"

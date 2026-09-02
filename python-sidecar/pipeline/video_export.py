@@ -203,9 +203,38 @@ def wrap_syllables(syllables: list[Syllable],
     return breaks
 
 
-def line_to_karaoke_text(syllables: list[Syllable]) -> str:
+def line_to_karaoke_text(syllables: list[Syllable],
+                         lead_in_s: float = 0.0) -> str:
     """
     Monta o texto da linha com as tags de karaokê.
+
+    `lead_in_s` é quanto tempo a linha fica na tela ANTES da primeira sílaba
+    ser cantada (o tempo de leitura). Precisa entrar aqui como uma pausa
+    explícita - ver o bloco abaixo, que é onde este módulo já errou feio.
+
+    BUG REAL CORRIGIDO (relatado por usuário, 02/09/2026 - "letra ~3 segundos
+    adiantada, constante na música inteira"):
+
+    No ASS, as durações de karaokê são RELATIVAS AO INÍCIO DO EVENTO, não ao
+    relógio da música. O primeiro "{\\kf}" começa a preencher no instante em
+    que a linha APARECE. Como a linha aparece `lead_in_s` antes de ser
+    cantada (pra dar tempo de ler), o preenchimento inteiro saía adiantado
+    exatamente esse tanto - em toda linha, a música inteira, um deslocamento
+    constante. O .txt do jogo estava certo o tempo todo; era só o vídeo.
+
+    A correção é a idiomática do formato: um "{\\k<centésimos>}" SEM TEXTO na
+    frente. Ele consome o tempo de leitura sem pintar nada, e só depois o
+    preenchimento chega na primeira sílaba - no instante certo.
+
+    Usa "\\k" (salto seco) e não "\\kf" (varredura) de propósito: não há texto
+    pra varrer, e um "\\kf" vazio é só uma forma mais confusa de escrever a
+    mesma espera.
+
+    POR QUE OS TESTES NÃO PEGARAM: eles conferiam as durações das sílabas e o
+    horário de início do evento SEPARADAMENTE, e os dois estavam certos. O que
+    ninguém checava era a RELAÇÃO entre eles - que é onde o erro morava. Agora
+    há um teste que reconstrói o horário ABSOLUTO em que cada sílaba acende e
+    compara com o tempo real da nota (test_video_export_logic.py).
 
     A duração de cada sílaba vai até o COMEÇO da próxima, não até o próprio
     fim. Numa nota curta seguida de uma pausa, usar o próprio fim faria o
@@ -218,6 +247,11 @@ def line_to_karaoke_text(syllables: list[Syllable]) -> str:
 
     wrap_at = set(wrap_syllables(syllables))
     parts: list[str] = []
+
+    lead_in_cs = int(round(lead_in_s * 100))
+    if lead_in_cs > 0:
+        parts.append("{\\k%d}" % lead_in_cs)
+
     for i, syl in enumerate(syllables):
         stop = syllables[i + 1].start_s if i + 1 < len(syllables) else syl.end_s
         duration_cs = max(1, int(round((stop - syl.start_s) * 100)))
@@ -320,9 +354,14 @@ def build_ass(song: Song, lead_in_s: float = LEAD_IN_S) -> str:
         disappear = line_end + LINGER_S
 
         style = "MainP2" if (song.duet and syls[0].singer == 2) else "Main"
+        # O tempo REAL de leitura é medido do aparecimento até a 1ª sílaba -
+        # não é o lead_in_s nominal, porque `appear` pode ter sido empurrado
+        # pra frente pelo fim da linha anterior. Passar o nominal aqui
+        # reintroduziria o mesmo deslocamento, só que menor.
         events.append(
             _dialogue(appear, disappear, style,
-                      line_to_karaoke_text(syls), MARGIN_V_MAIN)
+                      line_to_karaoke_text(syls, line_start - appear),
+                      MARGIN_V_MAIN)
         )
 
         # Prévia da PRÓXIMA linha, embaixo e apagada, enquanto esta é cantada.
