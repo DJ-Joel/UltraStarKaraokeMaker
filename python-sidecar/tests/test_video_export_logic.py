@@ -14,6 +14,8 @@ Rodar:  python -m pytest tests/ -v   (ou python tests/test_video_export_logic.py
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from pipeline.ultrastar_writer import Note, Song
@@ -357,7 +359,7 @@ if __name__ == "__main__":
 # Re-renderização avulsa (pós-revisão)
 # ---------------------------------------------------------------------------
 
-def test_rerender_sem_song_data_explica_o_motivo(tmp_path):
+def test_rerender_sem_song_data_explica_o_motivo(tmp_path, monkeypatch):
     """
     A pasta pode não ter o song_data.json (opção "manter apenas o essencial"
     apaga esse arquivo). A mensagem tem que dizer isso, não estourar um
@@ -365,18 +367,59 @@ def test_rerender_sem_song_data_explica_o_motivo(tmp_path):
     """
     from pipeline.video_export import rerender_from_folder
     import pytest as _pytest
+    monkeypatch.setenv("USKMAKER_LANG", "en")
     with _pytest.raises(FileNotFoundError) as exc:
         rerender_from_folder(tmp_path)
     msg = str(exc.value)
     assert "song_data.json" in msg
-    assert "essencial" in msg      # aponta a causa provável
+    assert "essentials" in msg      # aponta a causa provável
 
 
-def test_rerender_sem_audio_explica_o_motivo(tmp_path):
+@pytest.mark.parametrize("lang,esperado", [("pt", "essencial"), ("en", "essentials")])
+def test_mensagens_saem_no_idioma_escolhido(tmp_path, monkeypatch, lang, esperado):
+    """
+    REGRESSÃO (uso real, 02/09/2026): este caminho roda no TERMINAL, fora da
+    interface bilíngue do app - a mensagem é a única coisa que o usuário vê.
+    Um usuário de língua inglesa ficou travado num prompt em português.
+    """
+    from pipeline.video_export import rerender_from_folder
+    monkeypatch.setenv("USKMAKER_LANG", lang)
+    with pytest.raises(FileNotFoundError) as exc:
+        rerender_from_folder(tmp_path)
+    assert esperado in str(exc.value)
+
+
+@pytest.mark.parametrize("loc,esperado", [
+    (None,           "en"),   # sem pista nenhuma -> inglês alcança mais gente
+    ("en_US",        "en"),
+    ("pt_BR",        "pt"),
+    ("es_ES",        "en"),   # idioma não suportado cai no inglês, não no pt
+])
+def test_idioma_vem_do_locale_quando_nao_ha_override(monkeypatch, loc, esperado):
+    import locale as _locale
+    from pipeline import video_export
+    monkeypatch.delenv("USKMAKER_LANG", raising=False)
+    monkeypatch.setattr(_locale, "getlocale", lambda *a, **k: (loc, None))
+    monkeypatch.setattr(_locale, "getdefaultlocale", lambda *a, **k: (loc, None),
+                        raising=False)
+    assert video_export._lang() == esperado
+
+
+def test_override_de_idioma_ganha_do_locale(monkeypatch):
+    """O app passa a escolha do usuário; ela manda sobre o locale da máquina."""
+    import locale as _locale
+    from pipeline import video_export
+    monkeypatch.setattr(_locale, "getlocale", lambda *a, **k: ("pt_BR", None))
+    monkeypatch.setenv("USKMAKER_LANG", "en")
+    assert video_export._lang() == "en"
+
+
+def test_rerender_sem_audio_explica_o_motivo(tmp_path, monkeypatch):
     """song_data.json presente mas o áudio do pacote sumiu."""
     import json
     from pipeline.video_export import rerender_from_folder
     import pytest as _pytest
+    monkeypatch.setenv("USKMAKER_LANG", "en")
     (tmp_path / "song_data.json").write_text(json.dumps({
         "title": "T", "artist": "A", "mp3_filename": "sumiu.mp3",
         "bpm": 240.0, "gap_ms": 0, "notes": [], "phrase_breaks_after_index": [],

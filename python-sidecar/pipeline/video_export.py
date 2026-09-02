@@ -524,6 +524,75 @@ def ffmpeg_has_libass() -> bool:
 # Re-renderização avulsa (sem IA)
 # ---------------------------------------------------------------------------
 
+# Mensagens deste caminho AVULSO em dois idiomas.
+#
+# O log da pipeline é todo em português e continua assim - ele é lido dentro do
+# app, que já é bilíngue e enquadra tudo. Este caminho é diferente: o usuário
+# roda no terminal, SOZINHO, e a mensagem é a única coisa que ele vê. Um
+# usuário de língua inglesa travou exatamente aqui num uso real (02/09/2026),
+# olhando para um prompt em português sem saber o que responder.
+_MSG = {
+    "no_json": {
+        "pt": ("Não achei o song_data.json em {dir}. Sem ele não dá para refazer "
+               "o vídeo - ele guarda os tempos das sílabas. (A opção 'manter "
+               "apenas o essencial' apaga esse arquivo.)"),
+        "en": ("No song_data.json in {dir}. The video cannot be rebuilt without "
+               "it - it holds the syllable timings. (The 'keep only the "
+               "essentials' option deletes this file.)"),
+    },
+    "no_audio": {
+        "pt": "O áudio do pacote não está em {path}. O vídeo precisa dele.",
+        "en": "The package audio is missing at {path}. The video needs it.",
+    },
+    "no_libass": {
+        "pt": ("O ffmpeg encontrado não tem suporte a legendas (libass). Rode o "
+               "setup do ambiente de IA do USKMaker para baixar o ffmpeg completo."),
+        "en": ("The ffmpeg found has no subtitle support (libass). Run USKMaker's "
+               "'Set up AI environment' to download the full ffmpeg."),
+    },
+    "done": {
+        "pt": "[OK] Vídeo refeito: {path}",
+        "en": "[OK] Video rebuilt: {path}",
+    },
+    "cli_help": {
+        "pt": ("Refaz o vídeo de karaokê (.mp4) de um pacote já gerado, usando os "
+               "tempos atuais do song_data.json. Não roda IA."),
+        "en": ("Rebuild the karaoke video (.mp4) of an existing package from the "
+               "current song_data.json timings. Does not run the AI."),
+    },
+    "cli_dir": {
+        "pt": "Pasta da música (a que tem o song_data.json)",
+        "en": "Song folder (the one containing song_data.json)",
+    },
+}
+
+
+def _lang() -> str:
+    """
+    "pt" ou "en". USKMAKER_LANG manda (o app pode passar a escolha do usuário,
+    e os testes fixam o idioma); senão vale o locale do sistema. Default "en" -
+    quem não configurou nada tem mais chance de ler inglês que português.
+    """
+    import locale
+    import os
+
+    forced = os.environ.get("USKMAKER_LANG", "").strip().lower()
+    if forced.startswith("pt"):
+        return "pt"
+    if forced.startswith("en"):
+        return "en"
+    try:
+        loc = (locale.getlocale()[0] or "") + " " + (locale.getdefaultlocale()[0] or "")
+    except Exception:
+        loc = ""
+    return "pt" if "pt" in loc.lower()[:3] or loc.lower().startswith("pt") else "en"
+
+
+def msg(key: str, **kw) -> str:
+    """Texto de `key` no idioma corrente, já formatado."""
+    return _MSG[key][_lang()].format(**kw)
+
+
 
 def rerender_from_folder(song_dir: Path) -> Path:
     """
@@ -551,20 +620,14 @@ def rerender_from_folder(song_dir: Path) -> Path:
     song_dir = Path(song_dir)
     json_path = song_dir / "song_data.json"
     if not json_path.exists():
-        raise FileNotFoundError(
-            f"Não achei o song_data.json em {song_dir}. Sem ele não dá para "
-            f"refazer o vídeo - ele guarda os tempos das sílabas. (A opção "
-            f"'manter apenas o essencial' apaga esse arquivo.)"
-        )
+        raise FileNotFoundError(msg("no_json", dir=song_dir))
 
     data = json.loads(json_path.read_text(encoding="utf-8"))
     song = Song(**{**data, "notes": [Note(**n) for n in data["notes"]]})
 
     audio_path = song_dir / song.mp3_filename
     if not audio_path.exists():
-        raise FileNotFoundError(
-            f"O áudio do pacote não está em {audio_path}. O vídeo precisa dele."
-        )
+        raise FileNotFoundError(msg("no_audio", path=audio_path))
 
     def _opt(name: str | None) -> Path | None:
         return (song_dir / name) if name else None
@@ -585,19 +648,12 @@ def rerender_from_folder(song_dir: Path) -> Path:
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(
-        description="Refaz o vídeo de karaokê (.mp4) de um pacote já gerado, "
-                    "usando os tempos atuais do song_data.json. Não roda IA."
-    )
-    parser.add_argument("--dir", required=True,
-                        help="Pasta da música (a que tem o song_data.json)")
+    parser = argparse.ArgumentParser(description=msg("cli_help"))
+    parser.add_argument("--dir", required=True, help=msg("cli_dir"))
     args = parser.parse_args()
 
     if not ffmpeg_has_libass():
-        raise SystemExit(
-            "O ffmpeg encontrado não tem suporte a legendas (libass). "
-            "Rode o setup do ambiente de IA do USKMaker para baixar o ffmpeg completo."
-        )
+        raise SystemExit(msg("no_libass"))
 
     destino = rerender_from_folder(Path(args.dir))
-    print(f"[OK] Vídeo refeito: {destino}")
+    print(msg("done", path=destino))
