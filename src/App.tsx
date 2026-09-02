@@ -115,6 +115,7 @@ interface PersistedSettings {
   duet: boolean;
   backtrack: boolean;
   yargExport: boolean;
+  mp4Export: boolean;
   romanize: boolean;
   audioFormat: "ogg" | "mp3";
   maxVideoResolution: number;
@@ -246,6 +247,7 @@ function App() {
   const [duet, setDuet] = useState(saved.duet ?? false);
   const [backtrack, setBacktrack] = useState(saved.backtrack ?? false);
   const [yargExport, setYargExport] = useState(saved.yargExport ?? false);
+  const [mp4Export, setMp4Export] = useState(saved.mp4Export ?? false);
   const [romanize, setRomanize] = useState(saved.romanize ?? false);
   const [audioFormat, setAudioFormat] = useState<"ogg" | "mp3">(saved.audioFormat ?? "ogg");
   const [maxVideoResolution, setMaxVideoResolution] = useState(saved.maxVideoResolution ?? 1080);
@@ -343,9 +345,9 @@ function App() {
 
   // ------------------------------------------------ persistência leve
   useEffect(() => {
-    const settings: PersistedSettings = { sourceMode, language, outDir, withVideo, bgVideo, cleanWork, cleanExtras, withStems, duet, backtrack, yargExport, romanize, audioFormat, maxVideoResolution };
+    const settings: PersistedSettings = { sourceMode, language, outDir, withVideo, bgVideo, cleanWork, cleanExtras, withStems, duet, backtrack, yargExport, mp4Export, romanize, audioFormat, maxVideoResolution };
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-  }, [sourceMode, language, outDir, withVideo, bgVideo, cleanWork, cleanExtras, withStems, duet, backtrack, yargExport, romanize, audioFormat, maxVideoResolution]);
+  }, [sourceMode, language, outDir, withVideo, bgVideo, cleanWork, cleanExtras, withStems, duet, backtrack, yargExport, mp4Export, romanize, audioFormat, maxVideoResolution]);
 
   // ------------------------------------------------ SÓ EM DEV: preview de estado
   // Abre a UI num estado simulado sem precisar do backend Tauri, para inspecionar
@@ -641,6 +643,7 @@ function App() {
       backtrack,
       transpose: parseInt(transpose, 10) || 0,
       yargExport,
+      mp4Export,
       romanize,
       audioFormat,
       maxVideoResolution: sourceMode === "youtube" && withVideo ? maxVideoResolution : 0,
@@ -1359,6 +1362,16 @@ function App() {
             disabled={isRunning}
           />
           {t("backtrackLabel")}
+          <span className="tip-mark" aria-hidden="true">?</span>
+        </label>
+        <label className="checkbox-line" title={t("mp4ExportHint")}>
+          <input
+            type="checkbox"
+            checked={mp4Export}
+            onChange={(e) => setMp4Export(e.target.checked)}
+            disabled={isRunning}
+          />
+          {t("mp4ExportLabel")}
           <span className="tip-mark" aria-hidden="true">?</span>
         </label>
         <label className="checkbox-line" title={t("yargExportHint")}>

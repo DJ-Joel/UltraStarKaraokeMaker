@@ -54,6 +54,7 @@ from pipeline.filenames import sanitize_filename
 from pipeline.metadata import fetch_metadata
 from pipeline.proc_utils import ensure_ffmpeg_on_path, ffmpeg_exe, run_subprocess
 from pipeline.separate import isolate_lead_vocal, separate_vocals
+from pipeline.video_export import export_karaoke_video, ffmpeg_has_libass
 
 # Quando o stdout/stderr do Python não está conectado a um terminal real (é
 # o caso ao rodar via Tauri), o Python usa buffer em bloco por padrão.
@@ -349,6 +350,7 @@ def run_pipeline(
     backtrack: bool = False,
     transpose: int = 0,
     yarg_export: bool = False,
+    mp4_export: bool = False,
     romanize: bool = False,
     audio_format: str = "ogg",
     max_video_resolution: int = 0,
@@ -898,6 +900,49 @@ def run_pipeline(
                 f"O pacote UltraStar está OK."
             )
 
+    # Vídeo de karaokê (opt-in): renderiza "<base> (Karaoke).mp4" - a letra
+    # preenchendo sílaba a sílaba por cima do fundo, para tocar em qualquer
+    # TV/telefone, sem precisar do jogo instalado.
+    #
+    # Roda por ÚLTIMO de propósito. É o passo mais demorado depois da IA
+    # (minutos, dependendo do tamanho do fundo) e é o mais dispensável: quando
+    # ele chega, o pacote UltraStar inteiro já está escrito e válido no disco.
+    # Por isso o try/except só AVISA - a mesma regra do YARG acima: um extra
+    # não derruba uma geração que já deu certo.
+    #
+    # Reusa `final_audio_dest` (o áudio que foi para o pacote), então backtrack
+    # e transposição valem no vídeo sem nenhum código extra aqui. E ANTES do
+    # clean_work, que não importa para este passo (nada vem de _work) mas
+    # mantém a ordem "tudo que gera arquivo primeiro, limpeza depois".
+    if mp4_export:
+        debug_log("Exportando vídeo de karaokê (.mp4)")
+        if not ffmpeg_has_libass():
+            console.print(
+                "[yellow]AVISO[/yellow] O ffmpeg encontrado não tem suporte a "
+                "legendas (libass), então não dá para gravar a letra no vídeo. "
+                "O pacote UltraStar está OK. Rode o setup do ambiente de novo "
+                "para baixar o ffmpeg completo."
+            )
+        else:
+            console.print("[cyan]Renderizando vídeo de karaokê (.mp4)...[/cyan]")
+            try:
+                mp4_path = export_karaoke_video(
+                    song,
+                    out_path,
+                    file_base,
+                    audio_path=final_audio_dest,
+                    video_path=(out_path / video_filename) if video_filename else None,
+                    background_path=(out_path / background_filename) if background_filename else None,
+                    cover_path=metadata.cover_path,
+                )
+                console.print(f"[green]OK[/green] Vídeo de karaokê pronto: {mp4_path}")
+            except Exception as e:
+                debug_log(f"Falha ao renderizar o vídeo de karaokê (ignorada): {e}")
+                console.print(
+                    f"[yellow]AVISO[/yellow] Não consegui renderizar o vídeo de "
+                    f"karaokê: {e}. O pacote UltraStar está OK."
+                )
+
     # Limpeza opcional da pasta _work (intermediários: áudio bruto, stems do
     # Demucs, vídeo bruto). Só roda se o usuário pediu, e nunca derruba um
     # pipeline que já deu certo - por isso o try/except que só avisa.
@@ -956,6 +1001,7 @@ if __name__ == "__main__":
     parser.add_argument("--backtrack", action="store_true", help="Backtrack: o áudio do pacote é o INSTRUMENTAL (sem voz-guia), karaokê puro")
     parser.add_argument("--transpose", type=int, default=0, help="Transpõe o pacote N semitons (áudio via rubberband + pitches das notas). 0 = tom original")
     parser.add_argument("--yarg-export", action="store_true", help="Exporta também uma subpasta no layout do YARG (notes.txt + song.ini + stems song.ogg/vocals.ogg)")
+    parser.add_argument("--mp4-export", action="store_true", help="Renderiza também um vídeo de karaokê '<base> (Karaoke).mp4' (letra sincronizada gravada por cima do fundo)")
     parser.add_argument("--romanize", action="store_true", help="Reescreve o texto das notas em romaji (Hepburn) via pykakasi - para letras japonesas")
     parser.add_argument(
         "--synced-lyrics",
@@ -989,6 +1035,7 @@ if __name__ == "__main__":
             backtrack=args.backtrack,
             transpose=args.transpose,
             yarg_export=args.yarg_export,
+            mp4_export=args.mp4_export,
             romanize=args.romanize,
             synced_lyrics_path=args.synced_lyrics,
             audio_format=args.audio_format,

@@ -223,6 +223,11 @@ struct PipelineInput {
     /// YARG (notes.txt + song.ini + stems song.ogg/vocals.ogg). Opt-in.
     #[serde(default)]
     yarg_export: bool,
+    /// Vídeo de karaokê: além do pacote UltraStar, renderiza um .mp4 com a
+    /// letra sincronizada gravada por cima do fundo, para tocar em TV/telefone
+    /// sem o jogo. Opt-in (é o passo mais lento depois da IA).
+    #[serde(default)]
+    mp4_export: bool,
     /// Romanizar: reescreve o texto das notas em romaji (para letras japonesas).
     /// Opt-in; o alinhamento roda sobre o japonês original. Opt-in.
     #[serde(default)]
@@ -594,6 +599,7 @@ async fn run_pipeline(
         "backtrack": input.backtrack,
         "transpose": input.transpose,
         "yarg_export": input.yarg_export,
+        "mp4_export": input.mp4_export,
         "romanize": input.romanize,
         "synced_lyrics_path": synced_path.as_ref().map(|p| p.to_string_lossy().to_string()),
         "audio_format": input.audio_format,
