@@ -91,6 +91,9 @@ interface LrclibTrack {
   plainLyrics: string | null;
   syncedLyrics: string | null;
   instrumental?: boolean;
+  trackName?: string;
+  artistName?: string;
+  duration?: number;
 }
 
 /// Converte um .lrc em letra "plana" (uma linha por frase, sem timestamps) -
@@ -571,8 +574,56 @@ function App() {
         }
         return;
       }
-      const synced = resp.data.syncedLyrics?.trim() || null;
-      const plain = resp.data.plainLyrics?.trim() || (synced ? lrcToPlain(synced) : "");
+      let synced = resp.data.syncedLyrics?.trim() || null;
+      let plain = resp.data.plainLyrics?.trim() || (synced ? lrcToPlain(synced) : "");
+
+      // O /api/get devolve UM registro "melhor palpite" do LRCLIB. Como a base
+      // é colaborativa, a mesma música costuma ter dezenas de registros (edit
+      // de rádio, versão de álbum, extendida) e o escolhido pode muito bem ser
+      // um SEM sincronia - mesmo havendo vários COM.
+      //
+      // CASO REAL (02/09/2026, "Camouflage - The Great Commandment"): o
+      // /api/get trouxe a única versão sem sincronia; o /api/search listava 18
+      // registros, 16 deles sincronizados, incluindo um com a duração exata do
+      // áudio do usuário. A letra sincronizada é o que semeia âncora de início
+      // de linha no alinhamento - justamente o que faltava naquela música.
+      //
+      // Então: sem sincronia no /api/get, procura no /api/search. Escolher o
+      // registro errado é seguro - o lrc_duration_mismatch (align.py) descarta
+      // um .lrc cujos tempos não cabem no áudio, e aí voltamos a este mesmo
+      // resultado. O piso é o comportamento de hoje; o teto é bem melhor.
+      //
+      // MELHOR AINDA seria passar `duration` ao /api/get, que é como a API
+      // pede pra ser usada - mas a duração do áudio ainda não é conhecida aqui
+      // (o download nem aconteceu no modo YouTube).
+      if (!synced) {
+        try {
+          const alt = await httpFetch<LrclibTrack[]>("https://lrclib.net/api/search", {
+            method: "GET",
+            timeout: 20,
+            responseType: ResponseType.JSON,
+            query: { artist_name: artist.trim(), track_name: title.trim() },
+            headers: { "Lrclib-Client": "USKMaker/0.1.0 (https://github.com/walterfr/UltraStarKaraokeMaker)" },
+          });
+          if (alt.ok && Array.isArray(alt.data)) {
+            const wantedArtist = artist.trim().toLowerCase();
+            const wantedTitle = title.trim().toLowerCase();
+            const best = alt.data.find(
+              (r) =>
+                r.syncedLyrics?.trim() &&
+                (r.artistName ?? "").toLowerCase() === wantedArtist &&
+                (r.trackName ?? "").toLowerCase() === wantedTitle
+            ) ?? alt.data.find((r) => r.syncedLyrics?.trim());
+            if (best) {
+              synced = best.syncedLyrics!.trim();
+              plain = best.plainLyrics?.trim() || lrcToPlain(synced);
+            }
+          }
+        } catch {
+          // Busca alternativa é um bônus: falhar nela nunca pode derrubar a
+          // busca principal, que já tinha dado certo.
+        }
+      }
       if (!plain) {
         // inclui o caso instrumental=true (faixa sem letra)
         setLyricsSearchMsg({ kind: "warn", text: t("lyricsNotFound") });
