@@ -870,6 +870,39 @@ async fn torch_cuda_available(app: tauri::AppHandle, lang: String) -> Result<boo
     }
 }
 
+/// Refaz o .mp4 de karaokê de um pacote JÁ gerado, a partir do song_data.json
+/// atual da pasta. NÃO roda IA: leva segundos, não minutos.
+///
+/// POR QUE EXISTE: o save_song da tela de revisão grava o song_data.json
+/// corrigido e reescreve o .txt - e só. O vídeo ficava com os tempos ANTIGOS,
+/// silenciosamente. Sem este comando, aplicar um ajuste de meio segundo na
+/// revisão obrigava a reprocessar a música inteira (Demucs + WhisperX) só para
+/// refazer um passo que não depende de nada disso.
+#[tauri::command]
+async fn regenerate_video(app: tauri::AppHandle, out_dir: String, lang: String) -> Result<String, String> {
+    let (code_dir, python) = resolve_sidecar(&app, &lang)?;
+    let mut cmd = Command::new(&python);
+    // -m pipeline.video_export com cwd no código do sidecar: mesma forma como
+    // o resto da pipeline é invocada, então importações relativas funcionam.
+    cmd.arg("-m").arg("pipeline.video_export").arg("--dir").arg(&out_dir);
+    cmd.current_dir(&code_dir);
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    match cmd.output().await {
+        Ok(out) if out.status.success() => {
+            Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+        }
+        // O sidecar já devolve mensagem em português para os casos previstos
+        // (song_data.json ausente, áudio ausente, ffmpeg sem libass).
+        Ok(out) => {
+            let err = String::from_utf8_lossy(&out.stderr);
+            let last = err.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("");
+            Err(last.to_string())
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 /// Setup in-app do ambiente de IA: roda o setup-sidecar.ps1 em modo NÃO
 /// interativo (-Unattended) e transmite o progresso para a UI via evento
 /// "setup-log". Substitui o passo manual de "clicar com o direito no .ps1"
@@ -1438,6 +1471,7 @@ fn main() {
             cancel_pipeline,
             check_environment,
             torch_cuda_available,
+            regenerate_video,
             setup_environment
         ])
         .build(tauri::generate_context!())

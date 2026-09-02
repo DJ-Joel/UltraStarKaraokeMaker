@@ -236,6 +236,7 @@ export default function ReviewScreen({ outDir, onClose }: Props) {
   const [dirty, setDirty] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const minimapRef = useRef<HTMLCanvasElement | null>(null);
@@ -1537,6 +1538,30 @@ export default function ReviewScreen({ outDir, onClose }: Props) {
     }
   }
 
+  // Refaz o .mp4 com os tempos recém-salvos. Deliberadamente um BOTÃO, e não
+  // parte do Save: renderizar leva de segundos a minutos, e quem está
+  // corrigindo alinhamento salva várias vezes seguidas - fazer isso a cada
+  // Save transformaria uma ação instantânea numa espera repetida.
+  async function handleRegenerateVideo() {
+    // Só faz sentido sobre o que está no disco. Com alterações pendentes o
+    // vídeo sairia com os tempos ANTIGOS - exatamente o problema que este
+    // botão existe para resolver.
+    if (dirty) {
+      setStatusMsg(t("regenVideoSaveFirst"));
+      return;
+    }
+    setRegenerating(true);
+    setStatusMsg(t("regenVideoRunning"));
+    try {
+      await invoke<string>("regenerate_video", { outDir, lang });
+      setStatusMsg(t("regenVideoDone"));
+    } catch (err) {
+      setError(typeof err === "string" ? err : t("revSaveError"));
+    } finally {
+      setRegenerating(false);
+    }
+  }
+
   async function handleClose() {
     if (dirty) {
       const leave = await ask(t("revConfirmDiscard"), { title: "USKMaker", type: "warning" });
@@ -1614,6 +1639,14 @@ export default function ReviewScreen({ outDir, onClose }: Props) {
           </button>
           <button className="submit-button compact" onClick={handleSave} disabled={saving || !dirty}>
             {saving ? t("revSaving") : t("revSave")}
+          </button>
+          <button
+            className="secondary"
+            title={t("regenVideoHint")}
+            onClick={handleRegenerateVideo}
+            disabled={saving || regenerating}
+          >
+            {regenerating ? t("regenVideoRunning") : t("regenVideoButton")}
           </button>
         </div>
       </div>

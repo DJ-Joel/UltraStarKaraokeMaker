@@ -518,3 +518,86 @@ def ffmpeg_has_libass() -> bool:
         return "subtitles" in (result.stdout or "")
     except Exception:
         return False
+
+
+# ---------------------------------------------------------------------------
+# Re-renderização avulsa (sem IA)
+# ---------------------------------------------------------------------------
+
+
+def rerender_from_folder(song_dir: Path) -> Path:
+    """
+    Refaz o vídeo de karaokê a partir de uma pasta de pacote JÁ PRONTA.
+
+    POR QUE ISTO EXISTE: a tela de Revisão de Alinhamento salva o
+    song_data.json corrigido e reescreve o .txt - e só. O .mp4 continua com
+    os tempos ANTIGOS, sem nada avisando. Antes disto, aplicar um ajuste de
+    meio segundo na revisão exigia reprocessar a música inteira: minutos de
+    Demucs e WhisperX para refazer um passo que não depende de IA nenhuma.
+
+    Tudo o que o vídeo precisa já está na pasta depois de uma geração: os
+    tempos corrigidos (song_data.json), o áudio do pacote e o fundo. Então
+    aqui é só ler e renderizar - segundos de trabalho, não minutos.
+
+    Descobre os arquivos pelo PRÓPRIO song_data.json (mp3_filename,
+    video_filename, background_filename, cover_filename), que é a mesma fonte
+    que o .txt usa. Assim as opções já escolhidas na geração (backtrack,
+    transposição, formato do áudio) continuam valendo sem precisar repeti-las.
+    """
+    import json
+
+    from .filenames import sanitize_filename
+
+    song_dir = Path(song_dir)
+    json_path = song_dir / "song_data.json"
+    if not json_path.exists():
+        raise FileNotFoundError(
+            f"Não achei o song_data.json em {song_dir}. Sem ele não dá para "
+            f"refazer o vídeo - ele guarda os tempos das sílabas. (A opção "
+            f"'manter apenas o essencial' apaga esse arquivo.)"
+        )
+
+    data = json.loads(json_path.read_text(encoding="utf-8"))
+    song = Song(**{**data, "notes": [Note(**n) for n in data["notes"]]})
+
+    audio_path = song_dir / song.mp3_filename
+    if not audio_path.exists():
+        raise FileNotFoundError(
+            f"O áudio do pacote não está em {audio_path}. O vídeo precisa dele."
+        )
+
+    def _opt(name: str | None) -> Path | None:
+        return (song_dir / name) if name else None
+
+    file_base = sanitize_filename(f"{song.artist} - {song.title}")
+    if song.duet:
+        file_base = f"{file_base} [DUET]"
+
+    return export_karaoke_video(
+        song, song_dir, file_base,
+        audio_path=audio_path,
+        video_path=_opt(song.video_filename),
+        background_path=_opt(song.background_filename),
+        cover_path=_opt(song.cover_filename),
+    )
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Refaz o vídeo de karaokê (.mp4) de um pacote já gerado, "
+                    "usando os tempos atuais do song_data.json. Não roda IA."
+    )
+    parser.add_argument("--dir", required=True,
+                        help="Pasta da música (a que tem o song_data.json)")
+    args = parser.parse_args()
+
+    if not ffmpeg_has_libass():
+        raise SystemExit(
+            "O ffmpeg encontrado não tem suporte a legendas (libass). "
+            "Rode o setup do ambiente de IA do USKMaker para baixar o ffmpeg completo."
+        )
+
+    destino = rerender_from_folder(Path(args.dir))
+    print(f"[OK] Vídeo refeito: {destino}")

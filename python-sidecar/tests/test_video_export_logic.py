@@ -351,3 +351,36 @@ def test_musica_sem_notas_gera_ass_valido():
 if __name__ == "__main__":
     import pytest
     raise SystemExit(pytest.main([__file__, "-v"]))
+
+
+# ---------------------------------------------------------------------------
+# Re-renderização avulsa (pós-revisão)
+# ---------------------------------------------------------------------------
+
+def test_rerender_sem_song_data_explica_o_motivo(tmp_path):
+    """
+    A pasta pode não ter o song_data.json (opção "manter apenas o essencial"
+    apaga esse arquivo). A mensagem tem que dizer isso, não estourar um
+    KeyError ou um traceback.
+    """
+    from pipeline.video_export import rerender_from_folder
+    import pytest as _pytest
+    with _pytest.raises(FileNotFoundError) as exc:
+        rerender_from_folder(tmp_path)
+    msg = str(exc.value)
+    assert "song_data.json" in msg
+    assert "essencial" in msg      # aponta a causa provável
+
+
+def test_rerender_sem_audio_explica_o_motivo(tmp_path):
+    """song_data.json presente mas o áudio do pacote sumiu."""
+    import json
+    from pipeline.video_export import rerender_from_folder
+    import pytest as _pytest
+    (tmp_path / "song_data.json").write_text(json.dumps({
+        "title": "T", "artist": "A", "mp3_filename": "sumiu.mp3",
+        "bpm": 240.0, "gap_ms": 0, "notes": [], "phrase_breaks_after_index": [],
+    }), encoding="utf-8")
+    with _pytest.raises(FileNotFoundError) as exc:
+        rerender_from_folder(tmp_path)
+    assert "sumiu.mp3" in str(exc.value)
