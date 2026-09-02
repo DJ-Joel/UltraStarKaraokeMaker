@@ -35,6 +35,19 @@
 # foi pensado para rodar em GPU).
 
 # --- Download / extração de áudio ---
+# O yt-dlp ENVELHECE RÁPIDO: o YouTube muda o site e o download quebra até
+# sair versão nova. Um piso antigo aqui não é problema (o pip/uv instala a
+# mais recente), mas a versão instalada NÃO se atualiza sozinha depois.
+#
+# Quando um download começar a falhar (403 Forbidden, "unable to download
+# video data"), atualize só o yt-dlp - sem refazer o ambiente inteiro:
+#
+#   uv pip install --python <venv>\Scripts\python.exe --upgrade yt-dlp
+#
+# Se a versão estável ainda estiver quebrada, o canal de teste costuma ter a
+# correção antes (é onde as quebras do YouTube são consertadas primeiro):
+#
+#   ...--upgrade --prerelease allow "yt-dlp[default]"
 yt-dlp>=2024.4.9
 
 # --- Separação vocal ---
