@@ -1399,6 +1399,57 @@ mod analyze_tests {
 /// devolve o JSON como está. É uma conveniência: se o ambiente ainda não foi
 /// configurado (sem venv) ou algo falhar, o frontend simplesmente ignora.
 #[tauri::command]
+/// Metadados de um vídeo do YouTube SEM baixar nada: artista, título e -
+/// principalmente - a DURAÇÃO, que é o que permite escolher o registro certo
+/// entre as dezenas que o LRCLIB costuma ter para a mesma música.
+/// Irmão do read_audio_tags (arquivo local); mesma promessa de nunca falhar
+/// ruidosamente - devolve {} e a interface segue como antes.
+#[tauri::command]
+fn fetch_video_info(
+    app: tauri::AppHandle,
+    url: String,
+    lang: String,
+) -> Result<serde_json::Value, String> {
+    let (code_dir, python_exe) = resolve_sidecar(&app, &lang)?;
+    let script = code_dir.join("read_video_info.py");
+
+    let mut cmd = std::process::Command::new(&python_exe);
+    cmd.arg(&script).arg(&url);
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+
+    let output = cmd.output().map_err(|e| e.to_string())?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(serde_json::from_str(stdout.trim()).unwrap_or_else(|_| serde_json::json!({})))
+}
+
+/// Mantém o yt-dlp em dia. Chamado ao abrir o app, em segundo plano.
+///
+/// O yt-dlp envelhece rápido - o YouTube muda e o download quebra até sair
+/// versão nova, e a instalada não se atualiza sozinha. O script preserva o
+/// CANAL instalado (estável ou teste): quem está no de teste está lá porque o
+/// estável estava quebrado, e "atualizar para o último estável" seria um
+/// downgrade que devolve o erro já resolvido.
+#[tauri::command]
+async fn update_ytdlp(app: tauri::AppHandle, lang: String) -> Result<serde_json::Value, String> {
+    let (code_dir, python_exe) = resolve_sidecar(&app, &lang)?;
+    let script = code_dir.join("update_ytdlp.py");
+
+    let mut cmd = Command::new(&python_exe);
+    cmd.arg(&script);
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+
+    match cmd.output().await {
+        Ok(out) => {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            Ok(serde_json::from_str(stdout.trim())
+                .unwrap_or_else(|_| serde_json::json!({"ok": false, "changed": false})))
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 fn read_audio_tags(
     app: tauri::AppHandle,
     path: String,
@@ -1481,6 +1532,8 @@ fn main() {
             check_environment,
             torch_cuda_available,
             regenerate_video,
+            fetch_video_info,
+            update_ytdlp,
             setup_environment
         ])
         .build(tauri::generate_context!())

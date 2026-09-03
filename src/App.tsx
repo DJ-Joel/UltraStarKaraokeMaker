@@ -96,6 +96,16 @@ interface LrclibTrack {
   duration?: number;
 }
 
+/// Diferença máxima de duração, em segundos, para aceitar os TEMPOS de um
+/// registro do LRCLIB como sendo desta gravação.
+///
+/// Abaixo disto é a mesma música com ripagem/codificação levemente diferente,
+/// e os tempos servem. Acima, é outra montagem - versão extendida, ao vivo,
+/// edit de rádio com um verso a menos - cujos tempos não estão "um pouco
+/// errados", estão errados de um jeito que atrapalha. Nesse caso o pipeline
+/// fica só com o texto puro, que é o comportamento de antes.
+const MAX_DURATION_DIFF_S = 15;
+
 /// Converte um .lrc em letra "plana" (uma linha por frase, sem timestamps) -
 /// usado quando o LRCLIB só devolve a versão sincronizada.
 function lrcToPlain(lrc: string): string {
@@ -253,6 +263,11 @@ function App() {
   const [yargExport, setYargExport] = useState(saved.yargExport ?? false);
   const [mp4Export, setMp4Export] = useState(saved.mp4Export ?? false);
   const [whisperModel, setWhisperModel] = useState<string>(saved.whisperModel ?? "auto");
+  // Duração da faixa em segundos, quando conhecida (Buscar dados do vídeo, ou
+  // as tags de um arquivo local). É o que desempata a escolha de letra no
+  // LRCLIB - ver a nota longa em searchLyrics().
+  const [trackDuration, setTrackDuration] = useState<number | null>(null);
+  const [fetchingInfo, setFetchingInfo] = useState(false);
   const [romanize, setRomanize] = useState(saved.romanize ?? false);
   const [audioFormat, setAudioFormat] = useState<"ogg" | "mp3">(saved.audioFormat ?? "ogg");
   const [maxVideoResolution, setMaxVideoResolution] = useState(saved.maxVideoResolution ?? 1080);
@@ -430,6 +445,24 @@ function App() {
     };
   }, []);
 
+  // ------------------------------------------- yt-dlp sempre em dia
+  // O yt-dlp envelhece rápido: o YouTube muda e o download quebra até sair
+  // versão nova, e a instalada não se atualiza sozinha depois do setup (um
+  // usuário levou 403 com uma instalação de dois meses). Roda UMA vez por
+  // abertura, em segundo plano, sem segurar nada da interface: se der errado,
+  // o app funciona exatamente como antes. O script preserva o canal instalado
+  // (estável ou teste) - atualizar quem está no teste "para o último estável"
+  // seria um downgrade que devolve o erro já resolvido.
+  useEffect(() => {
+    invoke<{ changed?: boolean; before?: string; after?: string }>("update_ytdlp", { lang })
+      .then((r) => {
+        if (r?.changed) console.info(`[yt-dlp] ${r.before} -> ${r.after}`);
+      })
+      .catch(() => {});
+    // Sem dependências: uma vez por abertura, e não a cada troca de idioma.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // --------------------------------------------- checagem de ambiente
   // Refaz ao trocar de idioma para a mensagem de erro (se houver) vir traduzida.
   useEffect(() => {
@@ -546,6 +579,42 @@ function App() {
     }
   }
 
+  // Lê artista/título/duração do vídeo sem baixar nada. A duração é o ponto:
+  // sem ela, escolher entre as dezenas de registros do LRCLIB é sorteio.
+  async function fetchVideoInfo() {
+    const url = youtubeUrl.trim();
+    if (!url) return;
+    setFetchingInfo(true);
+    setLyricsSearchMsg(null);
+    try {
+      const info = await invoke<{
+        title?: string | null; artist?: string | null; duration?: number | null;
+      }>("fetch_video_info", { url, lang });
+      // Preenche, mas NÃO é a palavra final: o usuário confere e corrige antes
+      // de buscar a letra. Título de vídeo é território de "Official Video
+      // [HD Remaster]", e um artista errado envenena a consulta ao LRCLIB
+      // antes de qualquer ordenação por duração poder ajudar.
+      if (info?.artist) setArtist(info.artist);
+      if (info?.title) setTitle(info.title);
+      if (info?.duration && info.duration > 0) {
+        setTrackDuration(info.duration);
+        const mins = Math.floor(info.duration / 60);
+        const secs = Math.round(info.duration % 60);
+        setLyricsSearchMsg({
+          kind: "ok",
+          text: t("fetchInfoDone", { dur: `${mins}:${String(secs).padStart(2, "0")}` }),
+        });
+      } else {
+        setLyricsSearchMsg({ kind: "warn", text: t("fetchInfoFailed") });
+      }
+    } catch {
+      // Conveniência, nunca um bloqueio: dá pra digitar tudo à mão.
+      setLyricsSearchMsg({ kind: "warn", text: t("fetchInfoFailed") });
+    } finally {
+      setFetchingInfo(false);
+    }
+  }
+
   async function searchLyrics() {
     if (!artist.trim() || !title.trim()) {
       setLyricsSearchMsg({ kind: "err", text: t("lyricsNeedArtistTitle") });
@@ -557,6 +626,7 @@ function App() {
     }
     setLyricsSearching(true);
     setLyricsSearchMsg(null);
+    let durationPickNote: string | null = null;
     try {
       const resp = await httpFetch<LrclibTrack>("https://lrclib.net/api/get", {
         method: "GET",
@@ -608,15 +678,48 @@ function App() {
           if (alt.ok && Array.isArray(alt.data)) {
             const wantedArtist = artist.trim().toLowerCase();
             const wantedTitle = title.trim().toLowerCase();
-            const best = alt.data.find(
+
+            // SINCRONIA É FILTRO, NÃO CRITÉRIO DE DESEMPATE.
+            //
+            // Um registro sem sincronia não acrescenta NADA: o texto puro é
+            // praticamente igual em todos, e ele não tem tempos. Um registro
+            // sem sincronia com a duração exata vale o mesmo que nenhum
+            // registro. Já um sincronizado com alguns segundos de diferença
+            // ainda semeia âncoras úteis - e o pipeline demove sozinho as
+            // implausíveis (numa música real, 12 de 18 foram demovidas).
+            let candidates = alt.data.filter((r) => r.syncedLyrics?.trim());
+            const exact = candidates.filter(
               (r) =>
-                r.syncedLyrics?.trim() &&
                 (r.artistName ?? "").toLowerCase() === wantedArtist &&
                 (r.trackName ?? "").toLowerCase() === wantedTitle
-            ) ?? alt.data.find((r) => r.syncedLyrics?.trim());
+            );
+            if (exact.length) candidates = exact;
+
+            let best = candidates[0];
+            let diff: number | null = null;
+
+            // Com a duração conhecida, ordena por proximidade. Passando de
+            // MAX_DURATION_DIFF_S não é a mesma gravação - é outra montagem
+            // (versão extendida, ao vivo, edit de rádio com um verso a menos),
+            // e os tempos dela não estão "um pouco errados": estão errados de
+            // um jeito que atrapalha mais do que ajuda. Aí é melhor ficar só
+            // com o texto puro.
+            if (trackDuration && trackDuration > 0 && candidates.length) {
+              const scored = candidates
+                .map((r) => ({ r, d: Math.abs((r.duration ?? 0) - trackDuration) }))
+                .sort((a, b) => a.d - b.d);
+              if (scored[0].d <= MAX_DURATION_DIFF_S) {
+                best = scored[0].r;
+                diff = Math.round(scored[0].d);
+              } else {
+                best = undefined as unknown as LrclibTrack;
+              }
+            }
+
             if (best) {
               synced = best.syncedLyrics!.trim();
               plain = best.plainLyrics?.trim() || lrcToPlain(synced);
+              if (diff !== null) durationPickNote = String(diff);
             }
           }
         } catch {
@@ -633,7 +736,12 @@ function App() {
       setSyncedLyrics(synced);
       setLyricsSearchMsg(
         synced
-          ? { kind: "ok", text: t("lyricsFoundSynced") }
+          ? {
+              kind: "ok",
+              text: durationPickNote
+                ? t("lyricsPickedByDuration", { diff: durationPickNote })
+                : t("lyricsFoundSynced"),
+            }
           : { kind: "warn", text: t("lyricsFoundPlain") }
       );
     } catch (err) {
@@ -1185,6 +1293,14 @@ function App() {
             placeholder="https://www.youtube.com/watch?v=..."
             disabled={isRunning}
           />
+          <button
+            className="secondary compact"
+            title={t("fetchInfoHint")}
+            onClick={fetchVideoInfo}
+            disabled={isRunning || fetchingInfo || !youtubeUrl.trim()}
+          >
+            {fetchingInfo ? t("fetchInfoRunning") : t("fetchInfoButton")}
+          </button>
           <label className="checkbox-line" title={t("withVideoTip")}>
             <input
               type="checkbox"
