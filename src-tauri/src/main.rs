@@ -1393,12 +1393,6 @@ mod analyze_tests {
     }
 }
 
-/// Lê as tags básicas (título/artista/álbum/ano/gênero) de um arquivo de
-/// áudio local, para o app pré-preencher o formulário ao selecionar o arquivo.
-/// Roda o leitor leve `read_tags.py` (só mutagen) no python do sidecar e
-/// devolve o JSON como está. É uma conveniência: se o ambiente ainda não foi
-/// configurado (sem venv) ou algo falhar, o frontend simplesmente ignora.
-#[tauri::command]
 /// Metadados de um vídeo do YouTube SEM baixar nada: artista, título e -
 /// principalmente - a DURAÇÃO, que é o que permite escolher o registro certo
 /// entre as dezenas que o LRCLIB costuma ter para a mesma música.
@@ -1450,6 +1444,12 @@ async fn update_ytdlp(app: tauri::AppHandle, lang: String) -> Result<serde_json:
     }
 }
 
+/// Lê as tags básicas (título/artista/álbum/ano/gênero) de um arquivo de
+/// áudio local, para o app pré-preencher o formulário ao selecionar o arquivo.
+/// Roda o leitor leve `read_tags.py` (só mutagen) no python do sidecar e
+/// devolve o JSON como está. É uma conveniência: se o ambiente ainda não foi
+/// configurado (sem venv) ou algo falhar, o frontend simplesmente ignora.
+#[tauri::command]
 fn read_audio_tags(
     app: tauri::AppHandle,
     path: String,
