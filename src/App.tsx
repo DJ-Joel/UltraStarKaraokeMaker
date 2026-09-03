@@ -626,7 +626,6 @@ function App() {
     }
     setLyricsSearching(true);
     setLyricsSearchMsg(null);
-    let durationPickNote: string | null = null;
     try {
       const resp = await httpFetch<LrclibTrack>("https://lrclib.net/api/get", {
         method: "GET",
@@ -644,28 +643,46 @@ function App() {
         }
         return;
       }
-      let synced = resp.data.syncedLyrics?.trim() || null;
-      let plain = resp.data.plainLyrics?.trim() || (synced ? lrcToPlain(synced) : "");
+      // ---------------------------------------------------------------
+      // ESCOLHA DO REGISTRO
+      //
+      // O /api/get devolve UM "melhor palpite". A base é colaborativa e a
+      // mesma música costuma ter dezenas de registros (edit de rádio, versão
+      // de álbum, extendida), então esse palpite pode ser um SEM sincronia -
+      // ou um COM sincronia que é de OUTRA gravação.
+      //
+      // BUG DA PRIMEIRA VERSÃO (03/09/2026): a checagem de duração só rodava
+      // quando o /api/get não trazia sincronia. Se ele trouxesse, o registro
+      // era aceito sem conferir o tamanho - e todo o mecanismo de duração
+      // ficava de fora justamente no caminho mais comum. A duração tem que
+      // decidir QUAL registro, não só servir de plano B.
+      //
+      // Regra: sincronia é FILTRO (um registro sem tempos não acrescenta
+      // nada - o texto puro é igual em todos); a duração ORDENA entre os
+      // sincronizados; e além de MAX_DURATION_DIFF_S não é a mesma gravação,
+      // é outra montagem, cujos tempos atrapalham mais do que ajudam.
+      // ---------------------------------------------------------------
+      const primary = resp.data;
+      const known = trackDuration && trackDuration > 0 ? trackDuration : null;
+      const gapOf = (r: LrclibTrack): number | null =>
+        known && r.duration ? Math.abs(r.duration - known) : null;
 
-      // O /api/get devolve UM registro "melhor palpite" do LRCLIB. Como a base
-      // é colaborativa, a mesma música costuma ter dezenas de registros (edit
-      // de rádio, versão de álbum, extendida) e o escolhido pode muito bem ser
-      // um SEM sincronia - mesmo havendo vários COM.
-      //
-      // CASO REAL (02/09/2026, "Camouflage - The Great Commandment"): o
-      // /api/get trouxe a única versão sem sincronia; o /api/search listava 18
-      // registros, 16 deles sincronizados, incluindo um com a duração exata do
-      // áudio do usuário. A letra sincronizada é o que semeia âncora de início
-      // de linha no alinhamento - justamente o que faltava naquela música.
-      //
-      // Então: sem sincronia no /api/get, procura no /api/search. Escolher o
-      // registro errado é seguro - o lrc_duration_mismatch (align.py) descarta
-      // um .lrc cujos tempos não cabem no áudio, e aí voltamos a este mesmo
-      // resultado. O piso é o comportamento de hoje; o teto é bem melhor.
-      //
-      // MELHOR AINDA seria passar `duration` ao /api/get, que é como a API
-      // pede pra ser usada - mas a duração do áudio ainda não é conhecida aqui
-      // (o download nem aconteceu no modo YouTube).
+      let synced: string | null = null;
+      let plain = "";
+      let durationPickNote: string | null = null;
+
+      const primaryGap = gapOf(primary);
+      const primaryUsable =
+        !!primary.syncedLyrics?.trim() &&
+        (primaryGap === null || primaryGap <= MAX_DURATION_DIFF_S);
+
+      if (primaryUsable) {
+        synced = primary.syncedLyrics!.trim();
+        if (primaryGap !== null) durationPickNote = String(Math.round(primaryGap));
+      }
+
+      // Procura quando o palpite não serve: sem sincronia, ou sincronizado mas
+      // de uma gravação com outra duração.
       if (!synced) {
         try {
           const alt = await httpFetch<LrclibTrack[]>("https://lrclib.net/api/search", {
@@ -679,14 +696,6 @@ function App() {
             const wantedArtist = artist.trim().toLowerCase();
             const wantedTitle = title.trim().toLowerCase();
 
-            // SINCRONIA É FILTRO, NÃO CRITÉRIO DE DESEMPATE.
-            //
-            // Um registro sem sincronia não acrescenta NADA: o texto puro é
-            // praticamente igual em todos, e ele não tem tempos. Um registro
-            // sem sincronia com a duração exata vale o mesmo que nenhum
-            // registro. Já um sincronizado com alguns segundos de diferença
-            // ainda semeia âncoras úteis - e o pipeline demove sozinho as
-            // implausíveis (numa música real, 12 de 18 foram demovidas).
             let candidates = alt.data.filter((r) => r.syncedLyrics?.trim());
             const exact = candidates.filter(
               (r) =>
@@ -695,38 +704,35 @@ function App() {
             );
             if (exact.length) candidates = exact;
 
-            let best = candidates[0];
-            let diff: number | null = null;
-
-            // Com a duração conhecida, ordena por proximidade. Passando de
-            // MAX_DURATION_DIFF_S não é a mesma gravação - é outra montagem
-            // (versão extendida, ao vivo, edit de rádio com um verso a menos),
-            // e os tempos dela não estão "um pouco errados": estão errados de
-            // um jeito que atrapalha mais do que ajuda. Aí é melhor ficar só
-            // com o texto puro.
-            if (trackDuration && trackDuration > 0 && candidates.length) {
+            if (known && candidates.length) {
               const scored = candidates
-                .map((r) => ({ r, d: Math.abs((r.duration ?? 0) - trackDuration) }))
+                .map((r) => ({ r, d: Math.abs((r.duration ?? 0) - known) }))
                 .sort((a, b) => a.d - b.d);
               if (scored[0].d <= MAX_DURATION_DIFF_S) {
-                best = scored[0].r;
-                diff = Math.round(scored[0].d);
-              } else {
-                best = undefined as unknown as LrclibTrack;
+                synced = scored[0].r.syncedLyrics!.trim();
+                plain = scored[0].r.plainLyrics?.trim() || "";
+                durationPickNote = String(Math.round(scored[0].d));
               }
-            }
-
-            if (best) {
-              synced = best.syncedLyrics!.trim();
-              plain = best.plainLyrics?.trim() || lrcToPlain(synced);
-              if (diff !== null) durationPickNote = String(diff);
+            } else if (candidates.length) {
+              // Sem duração conhecida (o usuário não usou "Buscar dados do
+              // vídeo"): melhor um sincronizado qualquer que nenhum.
+              synced = candidates[0].syncedLyrics!.trim();
+              plain = candidates[0].plainLyrics?.trim() || "";
             }
           }
         } catch {
-          // Busca alternativa é um bônus: falhar nela nunca pode derrubar a
-          // busca principal, que já tinha dado certo.
+          // Busca alternativa é bônus: falhar nela nunca pode derrubar a
+          // consulta principal, que já tinha dado certo.
         }
       }
+
+      // Texto puro: do registro escolhido, senão do palpite, senão derivado
+      // do .lrc. Sempre há letra para o usuário revisar, mesmo sem tempos.
+      plain =
+        plain ||
+        primary.plainLyrics?.trim() ||
+        (synced ? lrcToPlain(synced) : "");
+
       if (!plain) {
         // inclui o caso instrumental=true (faixa sem letra)
         setLyricsSearchMsg({ kind: "warn", text: t("lyricsNotFound") });
