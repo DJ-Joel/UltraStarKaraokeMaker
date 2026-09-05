@@ -39,6 +39,11 @@ const STRINGS = {
     setupRunning: "Configurando o ambiente... (baixando ~2 GB, pode levar ~10 min)",
     setupDone: "Ambiente configurado! Pode gerar sua primeira música.",
     setupErrorPrefix: "Falha no setup:",
+    updateButton: "Atualizar ferramentas de IA",
+    updateHint: "Reexecuta o setup para atualizar as bibliotecas de IA. O seu torch (GPU) fica protegido durante a atualizacao.",
+    updateRunning: "Atualizando as ferramentas de IA... (pode levar alguns minutos)",
+    updateDone: "Ferramentas de IA atualizadas.",
+    updateErrorPrefix: "Falha na atualizacao:",
 
     // ---- fonte ----
     tabYoutube: "Link do YouTube",
@@ -303,6 +308,11 @@ const STRINGS = {
     setupRunning: "Setting up the environment... (downloading ~2 GB, may take ~10 min)",
     setupDone: "Environment ready! You can generate your first song.",
     setupErrorPrefix: "Setup failed:",
+    updateButton: "Update AI tools",
+    updateHint: "Re-runs the setup to update the AI libraries. Your torch (GPU) build is protected while it updates.",
+    updateRunning: "Updating the AI tools... (this may take a few minutes)",
+    updateDone: "AI tools updated.",
+    updateErrorPrefix: "Update failed:",
     envNoVorbis: "The installed ffmpeg lacks libvorbis support (needed for the package's .ogg audio) — use a \"full\" build.",
 
     tabYoutube: "YouTube link",

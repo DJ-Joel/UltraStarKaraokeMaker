@@ -322,6 +322,10 @@ function App() {
   const [setupLog, setSetupLog] = useState<string[]>([]);
   const [setupDone, setSetupDone] = useState(false);
   const [setupError, setSetupError] = useState<string | null>(null);
+  // Mesmo comando para os dois fluxos (o setup-sidecar.ps1 e idempotente e,
+  // desde 05/09/2026, atualiza as libs ao rodar de novo). O modo so decide
+  // QUAIS TEXTOS mostrar - nao muda o que e executado.
+  const [setupMode, setSetupMode] = useState<"setup" | "update">("setup");
 
   // splash: visível na abertura, some com fade (leve - overlay, sem janela extra)
   const [splashState, setSplashState] = useState<"show" | "fade" | "gone">("show");
@@ -507,7 +511,8 @@ function App() {
     };
   }, []);
 
-  async function handleSetup() {
+  async function handleSetup(mode: "setup" | "update" = "setup") {
+    setSetupMode(mode);
     setSettingUp(true);
     setSetupLog([]);
     setSetupError(null);
@@ -1218,6 +1223,16 @@ function App() {
           )}
         </div>
         <div className="header-actions">
+          {env && envProblems.length === 0 && (
+            <button
+              className="mini-button"
+              onClick={() => handleSetup("update")}
+              disabled={isRunning || settingUp}
+              title={t("updateHint")}
+            >
+              {t("updateButton")}
+            </button>
+          )}
           <button className="mini-button" onClick={pickPackageToReview} disabled={isRunning}>
             {t("reviewExisting")}
           </button>
@@ -1244,7 +1259,7 @@ function App() {
           </ul>
           {!settingUp ? (
             <>
-              <button className="submit-button compact" onClick={handleSetup}>
+              <button className="submit-button compact" onClick={() => handleSetup("setup")}>
                 {t("setupButton")}
               </button>
               <p className="field-hint">{t("setupHint")}</p>
@@ -1268,7 +1283,26 @@ function App() {
           )}
         </div>
       )}
-      {setupDone && env?.sidecarOk && <div className="info-box">{t("setupDone")}</div>}
+      {settingUp && setupMode === "update" && (
+        <div className="info-box setup-progress">
+          <p>
+            <span className="spinner" /> {t("updateRunning")}
+          </p>
+          <div className="setup-log">
+            {setupLog.slice(-14).map((l, i) => (
+              <div key={i}>{l}</div>
+            ))}
+          </div>
+        </div>
+      )}
+      {setupError && setupMode === "update" && !settingUp && (
+        <div className="error-box">
+          {t("updateErrorPrefix")} {setupError}
+        </div>
+      )}
+      {setupDone && env?.sidecarOk && (
+        <div className="info-box">{setupMode === "update" ? t("updateDone") : t("setupDone")}</div>
+      )}
 
       <div className="workspace">
       <section className={`ws-left${isRunning ? " dim" : ""}`}>
