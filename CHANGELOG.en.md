@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 Every version has a ready-to-use installer on **[Releases](https://github.com/walterfr/UltraStarKaraokeMaker/releases)** — each release's notes also carry the install instructions.
 
+## [Unreleased]
+
+### Added
+
+- **"Update AI tools" button in the app header.** Updating the AI libraries previously meant finding and re-running `setup-sidecar.ps1` by hand. The button reuses the same setup command (the script is idempotent), streams the live progress log, and only appears once the environment is healthy — while the environment is incomplete, the original "Set up AI environment" button still covers it. It is disabled while a song is being generated.
+
+### Fixed
+
+- **Re-running the setup never actually updated anything.** Dependencies are declared with a floor (`>=`), and `uv pip install` without `--upgrade` only checks that what is already installed satisfies the request, then stops — so re-running the setup printed "Audited N packages" and left the user frozen on the versions from the day they first installed, forever, with no warning that the command they ran to "update" does not update. The setup now upgrades, but freezes the installed torch into a constraints file first: `--upgrade` on its own would let whisperx's `torch~=2.8.0` accept a future CPU-only 2.8.1 from PyPI and silently cost the user their GPU — the same failure as the RTX 5080 report. If the installed versions cannot be read, nothing is updated: the previous behaviour is the safe fallback.
+- **The torch install message always said "CUDA cu126", even when installing cu128.** The label was hard-coded and never looked at the index actually chosen a few lines earlier, which made the RTX 50 fix look as though it had not taken effect. The label is now derived from the chosen index, so the message and the download cannot disagree.
+
+### Changed
+
+- **`scripts/setup-sidecar.ps1` is now written in English** (comments and on-screen messages), and its historical notes use unambiguous `YYYY-MM-DD` dates. No code changed — verified by comparing the parsed token stream of both versions.
+
 ## [0.20.0] — 2026-08-12
 
 ### Added

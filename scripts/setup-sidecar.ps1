@@ -76,7 +76,7 @@ if (-not $sidecarDir) {
 }
 Write-Ok "Sidecar at: $sidecarDir"
 
-# NOTE: until 16/07/2026 this script required Git here, because whisperx was
+# NOTE: until 2026-07-16 this script required Git here, because whisperx was
 # installed from "git+https://...". It now comes from PyPI (see
 # requirements.txt), so the setup no longer depends on Git at all.
 
@@ -119,7 +119,7 @@ if (Test-Path $uvExe) {
 # "compute capabilities" (sm_XX), and a card NEWER than the build simply has no
 # code to run.
 #
-# REAL BUG (reported by an RTX 5080 user, 02/09/2026): Blackwell (the RTX 50
+# REAL BUG (reported by an RTX 5080 user, 2026-09-02): Blackwell (the RTX 50
 # series, sm_120) only got kernels from CUDA 12.8 onwards. With the fixed cu126
 # this script used to install, the user downloaded 2.5 GB of CUDA and the
 # pipeline fell back to the CPU anyway - and resolve_device in main.py, which
@@ -249,7 +249,7 @@ if (Test-Path $ffmpegExe) {
 # still served the 2.8 series (whisperx's pin was satisfied by 2.8.0+cu126 -
 # a PEP 440 local version satisfies ~=2.8.0). The bug was born when the index
 # moved past 2.8, and it hits anyone installing TODAY. Found in clean-machine
-# testing (uv --python-preference only-managed), 17/07/2026.
+# testing (uv --python-preference only-managed), 2026-07-17.
 #
 # WHEN UPGRADING WHISPERX: check its requires_dist and realign these pins.
 # If they drift apart, the same silent damage comes back.
@@ -260,7 +260,7 @@ Write-Step "Installing torch ($torchLabel) - this may take several minutes"
 if ($LASTEXITCODE -ne 0) { Fail "Failed to install torch." }
 
 # ---------------------------------------------------------------------------
-# UNTIL 05/09/2026 THIS STEP UPDATED NOTHING AT ALL.
+# UNTIL 2026-09-05 THIS STEP UPDATED NOTHING AT ALL.
 #
 # The dependencies are declared with a FLOOR (">=4.0.1"), never a fixed
 # ceiling, and `uv pip install` WITHOUT `--upgrade` only checks whether what is
@@ -268,11 +268,11 @@ if ($LASTEXITCODE -ne 0) { Fail "Failed to install torch." }
 # already had the environment, running the setup again printed "Audited N
 # packages" and walked away. The user stayed frozen on the versions from the
 # day they first installed, FOREVER, with no warning that the command they ran
-# to "update" does not update. (yt-dlp escapes this since 02/09/2026 because it
+# to "update" does not update. (yt-dlp escapes this since 2026-09-02 because it
 # has its own updater, see update_ytdlp.py - the rest of the pipeline had
 # nothing.)
 #
-# MEASURED (05/09/2026, clean venv with uv):
+# MEASURED (2026-09-05, clean venv with uv):
 #   without --upgrade -> rich 13.7.0 stays 13.7.0   ("Audited 1 package")
 #   with --upgrade    -> rich 13.7.0 becomes 15.0.0
 #
@@ -282,7 +282,7 @@ if ($LASTEXITCODE -ne 0) { Fail "Failed to install torch." }
 # --upgrade swaps the CUDA torch for it and the GPU disappears - silently,
 # exactly as in the RTX 5080 report. This is not theory: it was measured.
 #
-# MEASURED (05/09/2026, with a test package imitating the local torch version):
+# MEASURED (2026-09-05, with a test package imitating the local torch version):
 #   --upgrade, index with 2.8.0 only     -> keeps 2.8.0+cu128 (the PEP 440
 #                                           local version beats plain 2.8.0)
 #   --upgrade, index already has 2.8.1   -> SWITCHES to 2.8.1 AND THE GPU IS GONE
@@ -369,7 +369,7 @@ if ($hasNvidia -and $cudaCheck -ne "True") {
 
 # Each module is tested SEPARATELY and with stderr captured safely.
 #
-# HISTORY (17/07/2026, a real report): the previous version imported everything
+# HISTORY (2026-07-17, a real report): the previous version imported everything
 # on a single line with "2>`$null" - and on Windows PowerShell 5.1, with
 # `$ErrorActionPreference = "Stop" plus stderr redirection, the FIRST line
 # python writes to stderr becomes a TERMINATING NativeCommandError. Result: the
@@ -385,7 +385,7 @@ if ($hasNvidia -and $cudaCheck -ne "True") {
 # ESSENTIAL modules: without any one of them the sidecar dies on import and the
 # app produces nothing. A failure here = environment rejected.
 #
-# swift_f0 (pitch extraction) was missing from this list (found 31/07/2026, a
+# swift_f0 (pitch extraction) was missing from this list (found 2026-07-31, a
 # real case): it imports onnxruntime just like audio_separator, but WITHOUT a
 # try/except guard in pipeline/pitch.py - if its onnxruntime fails (common
 # cause: the VC++ Redistributable is missing), the whole sidecar dies on
@@ -431,7 +431,7 @@ if ($failedCore.Count -eq 0) {
     # FAILURE (not a warning): without these libraries the app does NOT
     # generate - the sidecar dies on import, before it can write any log.
     # Ending here with a green banner is exactly what confused a user
-    # (16/07/2026).
+    # (2026-07-16).
     Fail @"
 These essential libraries did not import: $($failedCore -join ', ') - the environment is NOT ready.
 

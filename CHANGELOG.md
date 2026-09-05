@@ -6,6 +6,21 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 Cada versão tem um instalador pronto em **[Releases](https://github.com/walterfr/UltraStarKaraokeMaker/releases)** — as notas de cada release trazem também as instruções de instalação.
 
+## [Não lançado]
+
+### Adicionado
+
+- **Botão "Atualizar ferramentas de IA" no cabeçalho do app.** Atualizar as bibliotecas de IA exigia achar e rodar o `setup-sidecar.ps1` na mão. O botão reaproveita o mesmo comando do setup (o script é idempotente), transmite o log de progresso ao vivo e só aparece quando o ambiente está saudável — enquanto o ambiente estiver incompleto, o botão original "Configurar ambiente de IA" continua dando conta. Fica desabilitado enquanto uma música está sendo gerada.
+
+### Corrigido
+
+- **Rodar o setup de novo não atualizava absolutamente nada.** As dependências são declaradas com piso (`>=`), e o `uv pip install` sem `--upgrade` só confere se o que já está instalado satisfaz o pedido, e sai — então rodar o setup de novo imprimia "Audited N packages" e deixava o usuário congelado nas versões do dia em que instalou pela primeira vez, para sempre, sem nenhum aviso de que o comando que ele rodou para "atualizar" não atualiza. Agora o setup atualiza, mas antes congela o torch instalado num arquivo de constraints: o `--upgrade` sozinho deixaria o `torch~=2.8.0` do whisperx aceitar um futuro 2.8.1 de CPU vindo do PyPI e custaria a GPU do usuário em silêncio — a mesma falha do relato do RTX 5080. Se não der para ler as versões instaladas, nada é atualizado: o comportamento anterior é o fallback seguro.
+- **A mensagem de instalação do torch dizia sempre "CUDA cu126", mesmo instalando o cu128.** O rótulo era fixo e nunca olhava o índice escolhido poucas linhas acima, o que fazia a correção da RTX 50 parecer que não tinha pegado. O rótulo agora é derivado do índice escolhido, então mensagem e download não podem divergir.
+
+### Alterado
+
+- **O `scripts/setup-sidecar.ps1` passou a ser escrito em inglês** (comentários e mensagens de tela), e suas notas históricas usam datas `AAAA-MM-DD`, sem ambiguidade. Nenhum código mudou — verificado comparando o fluxo de tokens das duas versões.
+
 ## [0.20.0] — 2026-08-12
 
 ### Adicionado
