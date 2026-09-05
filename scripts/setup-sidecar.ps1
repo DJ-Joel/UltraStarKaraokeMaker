@@ -326,27 +326,32 @@ if ($torchFrozen.Count -gt 0) {
     Write-Warn2 "  (updating without that protection could swap CUDA torch for a CPU one)."
 }
 
-Write-Step "Installing/updating the remaining pipeline dependencies"
-& $uvExe pip install --python "$venvPython" @upgradeArgs -r "$reqFile"
-if ($LASTEXITCODE -ne 0) { Fail "Failed to install the dependencies (requirements.txt)." }
-
 # The [gpu]/[cpu] extra brings in onnxruntime, which audio-separator imports at
 # the top of the module but does NOT declare as a base dependency - without it
 # the lead-vocal rescue fails silently (it always falls back to the Demucs
 # stem).
-$sepExtra = if ($hasNvidia) { 'gpu' } else { 'cpu' }
-Write-Step "Installing/updating onnxruntime for audio-separator (extra [$sepExtra])"
-# `-c "$reqFile"` KEEPS THIS STEP INSIDE THE SAME VERSION LIMITS as the step
-# above. This command cannot use `-r` (the extra has to be picked per machine,
-# which a static file cannot express), so it used to resolve with no limits at
-# all. Harmless while nothing moved - but once --upgrade arrived (2026-09-05)
-# that gap let a dependency climb straight past a ceiling this project declares.
 #
-# MEASURED (2026-09-05, real machine): numpy landed on 2.5.2 here while
-# requirements.txt says `numpy>=2.1.0,<2.5`. With `-c` it resolves to 2.4.6, and
-# an environment already past the ceiling is brought back down to it.
-& $uvExe pip install --python "$venvPython" @upgradeArgs -c "$reqFile" "audio-separator[$sepExtra]>=0.44.0"
-if ($LASTEXITCODE -ne 0) { Fail "Failed to install audio-separator[$sepExtra] (onnxruntime)." }
+# THE EXTRA GOES IN THE SAME COMMAND AS requirements.txt, not a second command
+# after it. Both halves of that were learned the hard way on 2026-09-05:
+#
+#   1. As a SECOND, UNCONSTRAINED command it resolved with no version limits at
+#      all, so a dependency walked straight past a ceiling this project
+#      declares - numpy reached 2.5.2 while requirements.txt says `<2.5`.
+#
+#   2. The obvious repair - handing requirements.txt back as `-c` - CANNOT WORK
+#      on a normal install. uv splits the value of `--constraints` on
+#      whitespace, so the standard install path arrives as `C:\Program` and the
+#      run dies with "File not found: C:\Program". MEASURED: `-c`,
+#      `--constraints`, `--constraints=VALUE` and the UV_CONSTRAINT environment
+#      variable ALL split; `-r` is the only one that survives a path with a
+#      space in it.
+#
+# One command, one resolution: every ceiling in requirements.txt applies, the
+# per-machine extra still gets picked, and no path is mishandled.
+$sepExtra = if ($hasNvidia) { 'gpu' } else { 'cpu' }
+Write-Step "Installing/updating the pipeline dependencies (audio-separator extra [$sepExtra])"
+& $uvExe pip install --python "$venvPython" @upgradeArgs -r "$reqFile" "audio-separator[$sepExtra]>=0.44.0"
+if ($LASTEXITCODE -ne 0) { Fail "Failed to install the dependencies (requirements.txt + audio-separator[$sepExtra])." }
 
 Remove-Item $constraintsFile -Force -ErrorAction SilentlyContinue
 
