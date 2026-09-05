@@ -250,17 +250,79 @@ Write-Step "Instalando torch ($(if ($hasNvidia) {'CUDA cu126'} else {'CPU'})) - 
 & $uvExe pip install --python "$venvPython" @torchPin --index-url $torchIndex
 if ($LASTEXITCODE -ne 0) { Fail "Falha ao instalar o torch." }
 
-Write-Step "Instalando as demais dependencias do pipeline"
-& $uvExe pip install --python "$venvPython" -r (Join-Path $sidecarDir "requirements.txt")
+# ---------------------------------------------------------------------------
+# ATE 05/09/2026 ESTE PASSO NAO ATUALIZAVA COISA NENHUMA.
+#
+# As dependencias sao declaradas com PISO (">=4.0.1"), nunca com teto fixo, e o
+# `uv pip install` SEM `--upgrade` so confere se o que ja esta instalado
+# satisfaz o pedido - e sai. Numa maquina que ja tinha o ambiente, rodar o
+# setup de novo imprimia "Audited N packages" e ia embora. O usuario ficava
+# congelado nas versoes do dia em que instalou pela primeira vez, PARA SEMPRE,
+# sem nenhum aviso de que o comando que ele rodou pra "atualizar" nao atualiza.
+# (O yt-dlp escapa disso desde 02/09/2026 porque tem atualizador proprio, ver
+# update_ytdlp.py - o resto do pipeline nao tinha nada.)
+#
+# MEDIDO (05/09/2026, venv limpo com uv):
+#   sem --upgrade -> rich 13.7.0 continua 13.7.0   ("Audited 1 package")
+#   com --upgrade -> rich 13.7.0 vira 15.0.0
+#
+# MAS `--upgrade` SOZINHO RESSUSCITA O BUG DO TORCH DE CPU descrito acima.
+# O whisperx pede torch~=2.8.0, e isso ACEITA um 2.8.1 futuro. No dia em que o
+# PyTorch publicar esse patch no PyPI (que no Windows e build de CPU), o
+# --upgrade troca o torch CUDA por ele e a GPU some - em silencio, exatamente
+# como no relato do RTX 5080. Nao e teoria: foi medido.
+#
+# MEDIDO (05/09/2026, com pacote de teste imitando a versao local do torch):
+#   --upgrade, indice so com 2.8.0       -> mantem 2.8.0+cu128 (a versao local
+#                                           do PEP 440 ganha do 2.8.0 puro)
+#   --upgrade, indice ja com 2.8.1       -> TROCA para 2.8.1 e A GPU SE VAI
+#   --upgrade + arquivo de constraints   -> mantem 2.8.0+cu128 (protegido)
+#
+# Por isso congelamos o torch REALMENTE INSTALADO num arquivo de constraints e
+# atualizamos todo o resto por cima dele. Se por algum motivo nao der pra ler
+# as versoes instaladas, NAO atualizamos nada: o comportamento de antes e o
+# fallback seguro. Melhor ficar desatualizado do que perder a placa de video.
+# ---------------------------------------------------------------------------
+Write-Step "Preparando a atualizacao (protegendo o torch instalado)"
+
+$constraintsFile = Join-Path $env:TEMP "uskmaker-keep-torch.txt"
+$upgradeArgs = @()
+
+# Mesma blindagem de PS 5.1 usada na validacao la embaixo: com EAP=Stop, a
+# primeira linha que o uv escreve no stderr viraria erro TERMINANTE.
+$prevEAP = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+$frozen = & $uvExe pip freeze --python "$venvPython" 2>&1 | ForEach-Object { "$_" }
+$ErrorActionPreference = $prevEAP
+
+# `^torch==` nao casa com "torchcodec==..." (depois de "torch" vem "c", nao
+# "=="), entao o torchcodec continua livre pra atualizar - o que e desejavel,
+# ja que a versao que veio junto do torch 2.8 vive quebrada no Windows.
+$torchFrozen = @($frozen | Where-Object { $_ -match '^(torch|torchaudio|torchvision)==' })
+
+if ($torchFrozen.Count -gt 0) {
+    Set-Content -Path $constraintsFile -Value $torchFrozen -Encoding ASCII
+    $upgradeArgs = @("--upgrade", "-c", $constraintsFile)
+    Write-Ok "Atualizacao LIGADA. Congelado: $($torchFrozen -join ', ')"
+} else {
+    Write-Warn2 "Nao consegui ler a versao do torch instalado."
+    Write-Warn2 "  Por seguranca, as dependencias NAO serao atualizadas nesta execucao"
+    Write-Warn2 "  (atualizar sem essa protecao pode trocar o torch CUDA por um de CPU)."
+}
+
+Write-Step "Instalando/atualizando as demais dependencias do pipeline"
+& $uvExe pip install --python "$venvPython" @upgradeArgs -r (Join-Path $sidecarDir "requirements.txt")
 if ($LASTEXITCODE -ne 0) { Fail "Falha ao instalar as dependencias (requirements.txt)." }
 
 # O extra [gpu]/[cpu] traz o onnxruntime, que o audio-separator importa no
 # topo do modulo mas NAO declara como dependencia base - sem ele o resgate
 # de voz principal falha silenciosamente (cai sempre pro stem do Demucs).
 $sepExtra = if ($hasNvidia) { 'gpu' } else { 'cpu' }
-Write-Step "Instalando onnxruntime para o audio-separator (extra [$sepExtra])"
-& $uvExe pip install --python "$venvPython" "audio-separator[$sepExtra]>=0.44.0"
+Write-Step "Instalando/atualizando onnxruntime para o audio-separator (extra [$sepExtra])"
+& $uvExe pip install --python "$venvPython" @upgradeArgs "audio-separator[$sepExtra]>=0.44.0"
 if ($LASTEXITCODE -ne 0) { Fail "Falha ao instalar audio-separator[$sepExtra] (onnxruntime)." }
+
+Remove-Item $constraintsFile -Force -ErrorAction SilentlyContinue
 
 # ---------------------------------------------------------------------------
 # 7. Validacao final
