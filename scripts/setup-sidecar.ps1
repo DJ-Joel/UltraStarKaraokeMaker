@@ -76,6 +76,12 @@ if (-not $sidecarDir) {
 }
 Write-Ok "Sidecar at: $sidecarDir"
 
+# Resolved once, here, because $sidecarDir has just been proven to contain it
+# (that is how it was chosen). Both install steps below feed this same file to
+# uv - one as the requirement list, one as the version ceiling - and computing
+# it inline in each command made those calls awkward to test.
+$reqFile = Join-Path $sidecarDir "requirements.txt"
+
 # NOTE: until 2026-07-16 this script required Git here, because whisperx was
 # installed from "git+https://...". It now comes from PyPI (see
 # requirements.txt), so the setup no longer depends on Git at all.
@@ -321,7 +327,7 @@ if ($torchFrozen.Count -gt 0) {
 }
 
 Write-Step "Installing/updating the remaining pipeline dependencies"
-& $uvExe pip install --python "$venvPython" @upgradeArgs -r (Join-Path $sidecarDir "requirements.txt")
+& $uvExe pip install --python "$venvPython" @upgradeArgs -r "$reqFile"
 if ($LASTEXITCODE -ne 0) { Fail "Failed to install the dependencies (requirements.txt)." }
 
 # The [gpu]/[cpu] extra brings in onnxruntime, which audio-separator imports at
@@ -330,7 +336,16 @@ if ($LASTEXITCODE -ne 0) { Fail "Failed to install the dependencies (requirement
 # stem).
 $sepExtra = if ($hasNvidia) { 'gpu' } else { 'cpu' }
 Write-Step "Installing/updating onnxruntime for audio-separator (extra [$sepExtra])"
-& $uvExe pip install --python "$venvPython" @upgradeArgs "audio-separator[$sepExtra]>=0.44.0"
+# `-c "$reqFile"` KEEPS THIS STEP INSIDE THE SAME VERSION LIMITS as the step
+# above. This command cannot use `-r` (the extra has to be picked per machine,
+# which a static file cannot express), so it used to resolve with no limits at
+# all. Harmless while nothing moved - but once --upgrade arrived (2026-09-05)
+# that gap let a dependency climb straight past a ceiling this project declares.
+#
+# MEASURED (2026-09-05, real machine): numpy landed on 2.5.2 here while
+# requirements.txt says `numpy>=2.1.0,<2.5`. With `-c` it resolves to 2.4.6, and
+# an environment already past the ceiling is brought back down to it.
+& $uvExe pip install --python "$venvPython" @upgradeArgs -c "$reqFile" "audio-separator[$sepExtra]>=0.44.0"
 if ($LASTEXITCODE -ne 0) { Fail "Failed to install audio-separator[$sepExtra] (onnxruntime)." }
 
 Remove-Item $constraintsFile -Force -ErrorAction SilentlyContinue

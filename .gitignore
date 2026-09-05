@@ -55,6 +55,9 @@ Thumbs.db
 .claude/
 .codegraph/
 
+# Scratch folder used when working with Claude in this repo - local only.
+/Claude outputs/
+
 # Marcador local que liga o vídeo de karaokê sem a UI (ver server.py).
 # É por-instalação, nunca versionado.
 MP4-ON.txt
