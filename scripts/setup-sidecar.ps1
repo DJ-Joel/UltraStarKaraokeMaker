@@ -174,6 +174,14 @@ if ($hasNvidia) {
     $torchIndex = "https://download.pytorch.org/whl/cpu"
 }
 
+# O rotulo mostrado ao usuario sai do PROPRIO indice escolhido acima, e nao
+# de um texto fixo. Antes a mensagem de instalacao dizia "CUDA cu126" mesmo
+# quando instalava o cu128 numa Blackwell - so o rotulo estava errado, o
+# download ja era o certo, mas isso fazia parecer que a correcao da RTX 50
+# nao tinha pegado. Derivando daqui, mensagem e realidade nao podem divergir.
+$torchChannel = ($torchIndex -split '/')[-1]   # cu128 | cu126 | cpu
+$torchLabel = if ($torchChannel -eq 'cpu') { 'CPU' } else { "CUDA $torchChannel" }
+
 # ---------------------------------------------------------------------------
 # 4. Criar o venv com Python 3.12 (o uv baixa o Python se necessario)
 # ---------------------------------------------------------------------------
@@ -246,7 +254,7 @@ if (Test-Path $ffmpegExe) {
 # Se divergirem, volta o mesmo estrago silencioso.
 $torchPin = @("torch~=2.8.0", "torchaudio~=2.8.0", "torchvision~=0.23.0")
 
-Write-Step "Instalando torch ($(if ($hasNvidia) {'CUDA cu126'} else {'CPU'})) - pode demorar varios minutos"
+Write-Step "Instalando torch ($torchLabel) - pode demorar varios minutos"
 & $uvExe pip install --python "$venvPython" @torchPin --index-url $torchIndex
 if ($LASTEXITCODE -ne 0) { Fail "Falha ao instalar o torch." }
 
