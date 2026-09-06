@@ -106,6 +106,56 @@ interface LrclibTrack {
 /// fica só com o texto puro, que é o comportamento de antes.
 const MAX_DURATION_DIFF_S = 15;
 
+// Espelha lrc_duration_mismatch (python-sidecar/pipeline/align.py). Os dois
+// números têm de andar juntos: se divergirem, a UI escolhe um .lrc que o
+// sidecar depois joga fora - exatamente o que queremos parar de fazer.
+const LRC_HARD_MARGIN_S = 5;
+const LRC_MIN_COVERAGE = 0.5;
+
+/**
+ * Último instante REALMENTE cantado num .lrc: o maior timestamp que ainda
+ * tem texto depois dele. Linhas só com timestamp (marcadores de fim ou de
+ * trecho instrumental) não contam - é a mesma regra do parse_lrc do sidecar.
+ *
+ * POR QUE ISTO EXISTE, e não basta olhar o campo `duration` do registro:
+ * o LRCLIB é colaborativo e esse campo PODE ESTAR ERRADO. Caso real
+ * (2026-09-06, "Peter Murphy - Cuts You Up"): o registro 19409675 declara
+ * 254,8 s - batendo com a gravação - e carrega uma letra que vai até 5:12.
+ * Escolhendo pelo campo, pegávamos justamente esse; o sidecar então
+ * descartava a letra e a música saía com 17 linhas espremidas em 8 segundos.
+ * Os tempos DENTRO do arquivo não mentem; o metadado ao lado dele, sim.
+ */
+function lrcLastSungSecond(lrc: string): number | null {
+  let last: number | null = null;
+  for (const raw of lrc.split(/\r?\n/)) {
+    const stamps = [...raw.matchAll(/\[(\d+):(\d{1,2})(?:[.:](\d{1,3}))?\]/g)];
+    if (!stamps.length) continue;
+    const tail = stamps[stamps.length - 1];
+    const after = raw.slice((tail.index ?? 0) + tail[0].length).trim();
+    if (!after) continue;
+    for (const m of stamps) {
+      const secs =
+        parseInt(m[1], 10) * 60 + parseInt(m[2], 10) + (m[3] ? parseFloat("0." + m[3]) : 0);
+      if (last === null || secs > last) last = secs;
+    }
+  }
+  return last;
+}
+
+/** O .lrc pode ser desta gravação? Mesma regra do sidecar, aplicada ANTES. */
+function lrcFitsAudio(lrc: string, audioSeconds: number | null): boolean {
+  if (!audioSeconds || audioSeconds <= 0) return true; // sem duração não dá para julgar
+  const last = lrcLastSungSecond(lrc);
+  if (last === null) return false;
+  if (last > audioSeconds + LRC_HARD_MARGIN_S) return false;
+  return last / audioSeconds >= LRC_MIN_COVERAGE;
+}
+
+function fmtMMSS(seconds: number): string {
+  const s = Math.max(0, Math.round(seconds));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
 /// Converte um .lrc em letra "plana" (uma linha por frase, sem timestamps) -
 /// usado quando o LRCLIB só devolve a versão sincronizada.
 function lrcToPlain(lrc: string): string {
@@ -675,11 +725,15 @@ function App() {
       let synced: string | null = null;
       let plain = "";
       let durationPickNote: string | null = null;
+      // O registro escolhido cabe nesta gravacao? Decide a mensagem no fim.
+      let timingFits = true;
 
       const primaryGap = gapOf(primary);
       const primaryUsable =
         !!primary.syncedLyrics?.trim() &&
-        (primaryGap === null || primaryGap <= MAX_DURATION_DIFF_S);
+        (primaryGap === null || primaryGap <= MAX_DURATION_DIFF_S) &&
+        // Campo `duration` batendo NAO basta - ver lrcLastSungSecond.
+        lrcFitsAudio(primary.syncedLyrics!.trim(), known);
 
       if (primaryUsable) {
         synced = primary.syncedLyrics!.trim();
@@ -710,13 +764,34 @@ function App() {
             if (exact.length) candidates = exact;
 
             if (known && candidates.length) {
-              const scored = candidates
-                .map((r) => ({ r, d: Math.abs((r.duration ?? 0) - known) }))
-                .sort((a, b) => a.d - b.d);
-              if (scored[0].d <= MAX_DURATION_DIFF_S) {
-                synced = scored[0].r.syncedLyrics!.trim();
-                plain = scored[0].r.plainLyrics?.trim() || "";
-                durationPickNote = String(Math.round(scored[0].d));
+              // PRIMEIRO os que realmente CABEM no audio, medidos pelos
+              // tempos de DENTRO do arquivo. Entre eles, o que termina mais
+              // perto do fim da musica - e o que cobre a gravacao inteira.
+              const fitting = candidates.filter((r) =>
+                lrcFitsAudio(r.syncedLyrics!.trim(), known)
+              );
+              if (fitting.length) {
+                const byEnd = fitting
+                  .map((r) => ({
+                    r,
+                    d: Math.abs((lrcLastSungSecond(r.syncedLyrics!.trim()) ?? 0) - known),
+                  }))
+                  .sort((a, b) => a.d - b.d);
+                synced = byEnd[0].r.syncedLyrics!.trim();
+                plain = byEnd[0].r.plainLyrics?.trim() || "";
+              } else {
+                // Nenhum cabe. Nao somos nos que decidimos jogar fora - o
+                // sidecar ainda faz essa checagem, e agora o usuario e
+                // avisado ANTES de gerar. Melhor o menos ruim do que nada.
+                const scored = candidates
+                  .map((r) => ({ r, d: Math.abs((r.duration ?? 0) - known) }))
+                  .sort((a, b) => a.d - b.d);
+                if (scored[0].d <= MAX_DURATION_DIFF_S) {
+                  synced = scored[0].r.syncedLyrics!.trim();
+                  plain = scored[0].r.plainLyrics?.trim() || "";
+                  durationPickNote = String(Math.round(scored[0].d));
+                  timingFits = false;
+                }
               }
             } else if (candidates.length) {
               // Sem duração conhecida (o usuário não usou "Buscar dados do
@@ -745,14 +820,19 @@ function App() {
       }
       setLyricsText(plain);
       setSyncedLyrics(synced);
+      if (synced && !lrcFitsAudio(synced, known)) timingFits = false;
       setLyricsSearchMsg(
         synced
-          ? {
-              kind: "ok",
-              text: durationPickNote
-                ? t("lyricsPickedByDuration", { diff: durationPickNote })
-                : t("lyricsFoundSynced"),
-            }
+          ? !timingFits
+            ? { kind: "warn", text: t("lyricsTimingSuspect") }
+            : {
+                kind: "ok",
+                text: durationPickNote
+                  ? t("lyricsPickedByDuration", { diff: durationPickNote })
+                  : known
+                    ? t("lyricsPickedByTiming")
+                    : t("lyricsFoundSynced"),
+              }
           : { kind: "warn", text: t("lyricsFoundPlain") }
       );
     } catch (err) {
@@ -970,6 +1050,25 @@ function App() {
   async function handleGenerate() {
     if (isRunning) return;
     const formErr = validate();
+
+    // AVISO ANTES DE GERAR (2026-09-06): uma letra sincronizada cujos tempos
+    // nao cabem no audio e o sintoma de gravacao errada, e o sidecar VAI
+    // descarta-la (lrc_duration_mismatch) - o alinhamento entao corre so com
+    // a IA e costuma sair bem pior. Antes disto o usuario so descobria depois
+    // de tres minutos de processamento. A checagem e a mesma; a diferenca e
+    // que agora ela roda enquanto ainda da para trocar a letra.
+    if (!formErr && syncedLyrics && trackDuration && trackDuration > 0 &&
+        !lrcFitsAudio(syncedLyrics, trackDuration)) {
+      const lastSung = lrcLastSungSecond(syncedLyrics);
+      const ok = await ask(
+        t("lyricsTimingConfirm", {
+          lrc: lastSung === null ? "?" : fmtMMSS(lastSung),
+          audio: fmtMMSS(trackDuration),
+        }),
+        { title: "USKMaker" }
+      );
+      if (!ok) return;
+    }
     const pending = queue.filter((it) => it.status === "pending");
 
     // Se o formulário está preenchido, a música atual entra como último item.

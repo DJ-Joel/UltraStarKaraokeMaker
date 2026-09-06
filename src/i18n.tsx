@@ -44,6 +44,9 @@ const STRINGS = {
     updateRunning: "Atualizando as ferramentas de IA... (pode levar alguns minutos)",
     updateDone: "Ferramentas de IA atualizadas.",
     updateErrorPrefix: "Falha na atualizacao:",
+    lyricsPickedByTiming: "Letra sincronizada encontrada (tempos conferem com esta gravação).",
+    lyricsTimingSuspect: "Letra sincronizada encontrada, mas os tempos NÃO cabem nesta gravação - provável versão diferente. Confira antes de gerar.",
+    lyricsTimingConfirm: "A letra sincronizada vai até {lrc}, mas esta gravação tem {audio}.\n\nQuase sempre é letra de OUTRA versão (álbum x edit, ao vivo, remix). O alinhamento vai descartá-la e seguir só com a IA, o que costuma sair pior.\n\nGerar mesmo assim?",
 
     // ---- fonte ----
     tabYoutube: "Link do YouTube",
@@ -313,6 +316,9 @@ const STRINGS = {
     updateRunning: "Updating the AI tools... (this may take a few minutes)",
     updateDone: "AI tools updated.",
     updateErrorPrefix: "Update failed:",
+    lyricsPickedByTiming: "Synced lyrics found (timings match this recording).",
+    lyricsTimingSuspect: "Synced lyrics found, but their timings do NOT fit this recording - probably a different version. Check before generating.",
+    lyricsTimingConfirm: "The synced lyrics run to {lrc}, but this recording is {audio}.\n\nThat is almost always lyrics from a DIFFERENT version (album vs edit, live, remix). Alignment will discard them and fall back to the AI alone, which usually comes out worse.\n\nGenerate anyway?",
     envNoVorbis: "The installed ffmpeg lacks libvorbis support (needed for the package's .ogg audio) — use a \"full\" build.",
 
     tabYoutube: "YouTube link",
