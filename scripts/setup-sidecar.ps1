@@ -235,6 +235,66 @@ if (Test-Path $ffmpegExe) {
 }
 
 # ---------------------------------------------------------------------------
+# 5b. FFmpeg SHARED libraries, for torchcodec
+# ---------------------------------------------------------------------------
+# The bundled ffmpeg above is a SELF-CONTAINED build - one large .exe with
+# everything compiled in and no separate library files beside it. Perfect for
+# running ffmpeg; useless to torchcodec, which needs FFmpeg's SHARED libraries
+# and looks for them in the folder holding the ffmpeg.exe it finds.
+#
+# torchcodec arrives with torch 2.8 and is what torchaudio/pyannote reach for
+# when decoding audio. Without these files it fails on every attempt and fills
+# the log with a warning. Harmless today - the older decoders still work - but
+# when whisperx moves to torch 2.9+ those older decoders are gone and this
+# stops being cosmetic.
+#
+# VERSION 7 DELIBERATELY: torchcodec 0.7.0 ships loaders for FFmpeg 4, 5, 6
+# and 7 only, and even 0.10.0 stops at 8. An FFmpeg 9 build - which is what a
+# "latest" download gives you today - cannot be used by ANY torchcodec.
+#
+# SEVEN FILES, not six: avfilter-10 pulls in postproc-58. Found the hard way
+# (2026-09-05) - with only the six that torchcodec's own core7.dll imports
+# directly, five loaded and avfilter-10 failed with "or one of its
+# dependencies", a message that never says WHICH one.
+#
+# Putting the files here is only half of it: since Python 3.8 Windows does not
+# search the PATH for a DLL's dependencies, and torchcodec 0.7.0 does nothing
+# about that (the PATH lookup only arrived in 0.10.0). The sidecar registers
+# this folder itself - see _expose_ffmpeg_dlls in pipeline/proc_utils.py.
+#
+# NON-FATAL by design: everything else works without these.
+Write-Step "Setting up the FFmpeg shared libraries (for torchcodec)"
+
+$ffLibs = @("avcodec-61.dll", "avfilter-10.dll", "avformat-61.dll", "avutil-59.dll",
+            "postproc-58.dll", "swresample-5.dll", "swscale-8.dll")
+$missingLibs = @($ffLibs | Where-Object { -not (Test-Path (Join-Path $binDir $_)) })
+
+if ($missingLibs.Count -eq 0) {
+    Write-Ok "FFmpeg shared libraries already present in $binDir"
+} else {
+    try {
+        $shUrl = "https://github.com/GyanD/codexffmpeg/releases/download/7.1.1/ffmpeg-7.1.1-full_build-shared.zip"
+        $shZip = Join-Path $env:TEMP "uskmaker-ffmpeg7-shared.zip"
+        $shDir = Join-Path $env:TEMP "uskmaker-ffmpeg7-extract"
+        Write-Host "    Downloading the FFmpeg 7.1.1 shared build (~72 MB)..."
+        Invoke-WebRequest -Uri $shUrl -OutFile $shZip -UseBasicParsing
+        if (Test-Path $shDir) { Remove-Item -Recurse -Force $shDir }
+        Expand-Archive -Path $shZip -DestinationPath $shDir -Force
+        foreach ($lib in $ffLibs) {
+            $srcLib = Get-ChildItem -Path $shDir -Recurse -Filter $lib | Select-Object -First 1
+            if (-not $srcLib) { throw "$lib was not found inside the downloaded zip." }
+            Copy-Item $srcLib.FullName (Join-Path $binDir $lib) -Force
+        }
+        Remove-Item $shZip -Force -ErrorAction SilentlyContinue
+        Remove-Item -Recurse -Force $shDir -ErrorAction SilentlyContinue
+        Write-Ok "FFmpeg shared libraries installed in $binDir"
+    } catch {
+        Write-Warn2 "Could not install the FFmpeg shared libraries: $($_.Exception.Message)"
+        Write-Warn2 "  Not fatal - the app still works; only torchcodec stays unavailable."
+    }
+}
+
+# ---------------------------------------------------------------------------
 # 6. Install dependencies via uv (the slow step - large downloads)
 # ---------------------------------------------------------------------------
 # TORCH IS PINNED TO THE SERIES WHISPERX REQUIRES (torch~=2.8.0), and that is
@@ -385,6 +445,22 @@ if ($hasNvidia -and $cudaCheck -ne "True") {
     Write-Warn2 "  (2) the CUDA build does not cover the card's generation; (3) the driver."
 } else {
     Write-Ok "torch installed (CUDA available: $cudaCheck)"
+}
+
+# torchcodec check, done THE WAY THE APP DOES IT. Importing torchcodec without
+# registering the ffmpeg folder first would fail even on a perfect install -
+# a check that does not mirror pipeline/proc_utils.py would simply lie.
+# Informational only: nothing here can fail the setup.
+$prevEAP = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+$tcCode = "import os; os.add_dll_directory(r'$binDir'); from torchcodec.decoders import AudioDecoder; print('TC_OK')"
+$tcOut = & $venvPython -c $tcCode 2>&1 | ForEach-Object { "$_" }
+$tcExit = $LASTEXITCODE
+$ErrorActionPreference = $prevEAP
+if ($tcExit -eq 0 -and ($tcOut -join "`n") -match 'TC_OK') {
+    Write-Ok "torchcodec loads (FFmpeg shared libraries found)"
+} else {
+    Write-Warn2 "torchcodec does not load - harmless today, the older decoders still work."
 }
 
 # Each module is tested SEPARATELY and with stderr captured safely.
