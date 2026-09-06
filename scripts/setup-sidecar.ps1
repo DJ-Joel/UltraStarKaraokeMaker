@@ -361,6 +361,32 @@ if ($LASTEXITCODE -ne 0) { Fail "Failed to install torch." }
 # ---------------------------------------------------------------------------
 Write-Step "Preparing the update (protecting the installed torch)"
 
+# uv SPLITS THE VALUE OF `--constraints` ON WHITESPACE. Measured 2026-09-05:
+# `-c`, `--constraints`, `--constraints=VALUE` and the UV_CONSTRAINT
+# environment variable ALL split it; only `-r` survives a path with a space.
+#
+# This file lives in %TEMP%. For anyone whose Windows account name is two
+# words that is "C:\Users\John Smith\AppData\Local\Temp\...", so uv would see
+# "C:\Users\John" and stop with "File not found" - taking the whole setup down
+# with it. That is not hypothetical: the identical failure hit this script from
+# the sidecar path on 2026-09-05, before the cause was understood.
+#
+# Windows keeps an 8.3 short name for such paths ("C:\Users\JOHNSM~1\...") and
+# a short name never contains a space, so we hand uv that instead. When 8.3
+# names are disabled on the volume the short name comes back unchanged, and
+# then we do the SAFE thing rather than the clever one: no upgrade at all,
+# exactly as when the installed torch version cannot be read. Being out of date
+# beats losing the GPU, and both beat a setup that dies.
+function Get-UvSafePath($path) {
+    if ($path -notmatch ' ') { return $path }
+    try {
+        $fso = New-Object -ComObject Scripting.FileSystemObject
+        $short = $fso.GetFile($path).ShortPath
+        if ($short -and $short -notmatch ' ') { return $short }
+    } catch { }
+    return $null
+}
+
 $constraintsFile = Join-Path $env:TEMP "uskmaker-keep-torch.txt"
 $upgradeArgs = @()
 
@@ -376,14 +402,23 @@ $ErrorActionPreference = $prevEAP
 # version that shipped alongside torch 2.8 is permanently broken on Windows.
 $torchFrozen = @($frozen | Where-Object { $_ -match '^(torch|torchaudio|torchvision)==' })
 
-if ($torchFrozen.Count -gt 0) {
-    Set-Content -Path $constraintsFile -Value $torchFrozen -Encoding ASCII
-    $upgradeArgs = @("--upgrade", "-c", $constraintsFile)
-    Write-Ok "Updating is ON. Frozen: $($torchFrozen -join ', ')"
-} else {
+if ($torchFrozen.Count -eq 0) {
     Write-Warn2 "Could not read the installed torch version."
     Write-Warn2 "  To be safe, the dependencies will NOT be updated on this run"
     Write-Warn2 "  (updating without that protection could swap CUDA torch for a CPU one)."
+} else {
+    Set-Content -Path $constraintsFile -Value $torchFrozen -Encoding ASCII
+    # Must run AFTER the file exists - the short name is read from the file.
+    $constraintsArg = Get-UvSafePath $constraintsFile
+    if ($constraintsArg) {
+        $upgradeArgs = @("--upgrade", "-c", $constraintsArg)
+        Write-Ok "Updating is ON. Frozen: $($torchFrozen -join ', ')"
+    } else {
+        Write-Warn2 "The temporary folder path contains a space and Windows has no"
+        Write-Warn2 "  short name for it, and uv cannot be given a path like that."
+        Write-Warn2 "  The dependencies will NOT be updated on this run - protecting the"
+        Write-Warn2 "  CUDA torch matters more than being up to date."
+    }
 }
 
 # The [gpu]/[cpu] extra brings in onnxruntime, which audio-separator imports at
