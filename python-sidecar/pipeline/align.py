@@ -304,6 +304,7 @@ def seed_line_anchors(
     lrc_lines: list[tuple[float, str]],
     tolerance: float = 0.6,
     override_measured: bool = False,
+    max_seed_lead: float = 3.0,
 ) -> int:
     """
     Semeia âncoras de linha (LRCLIB) na PRIMEIRA palavra de cada linha da
@@ -331,6 +332,9 @@ def seed_line_anchors(
     O modo só é ligado quando DUAS condições valem juntas (ver o chamador):
     reconhecimento abaixo do piso E duração do .lrc batendo com o áudio. Com
     reconhecimento bom nada muda, então música que já funciona não regride.
+
+    `max_seed_lead` recusa um início de linha que caia MUITO antes da primeira
+    palavra MEDIDA da PRÓPRIA linha - ver o guarda-corpo lá embaixo.
     """
     line_texts = [t for t, _ in lyric_lines]
     matched = match_lrc_to_lines(line_texts, lrc_lines)
@@ -369,6 +373,40 @@ def seed_line_anchors(
                 continue
             if next_start is not None and t > next_start + tolerance:
                 continue
+            # O teste acima cobre só UM lado: início de linha DEPOIS da âncora
+            # seguinte. O outro lado passava batido - e é o que quebra na
+            # prática.
+            #
+            # CASO REAL (2026-09-06, "Ministry - Effigy (I'm Not An)"): o .lrc
+            # abre a linha "But them burning pictures of my head to toe, hey!"
+            # em 40,56s, mas o Whisper MEDIU o resto dessa mesma linha a partir
+            # de 45,24s. A semente entrou em "But" e as duas fontes ficaram
+            # coladas no mesmo verso: a primeira palavra 4,7s adiantada,
+            # sozinha, e um buraco até o resto da frase. Pior, a linha ANTERIOR
+            # ficou espremida em 1,58s (7 palavras) entre as duas sementes.
+            #
+            # Quando a letra sincronizada e uma MEDIÇÃO discordam assim dentro
+            # de UMA linha, a medição ganha: ela veio do áudio desta gravação.
+            # Recusar a semente devolve a palavra à interpolação, que a espalha
+            # entre as âncoras vizinhas - sem buraco e sem verso espremido.
+            #
+            # SÓ dentro da MESMA linha, de propósito: entre linhas um vão
+            # grande é normal (intervalo instrumental), e olhar a próxima
+            # âncora global recusaria sementes boas justamente aí.
+            if max_seed_lead is not None:
+                line_end = (
+                    lyric_lines[line_idx + 1][1]
+                    if line_idx + 1 < len(lyric_lines)
+                    else n
+                )
+                first_measured = None
+                for k in range(start_word + 1, min(line_end, n)):
+                    a = anchors[k]
+                    if a is not None and a[3] != SOURCE_LRC:
+                        first_measured = a[0]
+                        break
+                if first_measured is not None and first_measured - t > max_seed_lead:
+                    continue
         end = t + 0.25
         if next_start is not None and not override_measured:
             end = min(end, max(t + 0.02, next_start - 0.02))

@@ -113,6 +113,26 @@ ALIGNMENT_FAILED_PCT = 50.0
 # gold/áudio, não erro do pipeline - não disparam, corretamente.)
 WHISPER_RECALL_FLOOR = 0.60
 
+# Teto de interpolação abaixo do qual um word-recall baixo deixa de ser alarme
+# e vira informação - DESDE QUE a letra sincronizada tenha entrado de verdade.
+#
+# POR QUE: o aviso de recall mede só o que o Whisper reconheceu SOZINHO
+# (anchor + fuzzy). Ele não enxerga o realinhamento nem o .lrc - a limitação
+# que o comentário do WHISPER_RECALL_FLOOR acima já registra ("o realinhamento
+# salva, mas o word-recall não sabe disso", caso Chop Suey).
+#
+# MEDIDO (2026-09-06, três músicas reais do usuário, todas com recall parecido):
+#   Peter Murphy - Cuts You Up   recall 55%, .lrc RECUSADO  -> 38% interpoladas
+#   Killing Joke - Sanity        recall 53%, .lrc aceito    ->  0% interpoladas
+#   Ministry - Revenge           recall 59%, .lrc aceito    ->  0,3% interpoladas
+#
+# Ou seja: o recall quase não previu a qualidade; o .lrc caber na gravação
+# previu tudo. As duas boas levaram o mesmo susto vermelho da quebrada, o que
+# treina o usuário a ignorar o aviso - e aí ele não serve pra nada quando
+# importa. `by_source["lrc"] > 0` só acontece quando a letra sincronizada
+# passou na checagem de duração E semeou inícios de linha de fato.
+LRC_RESCUE_INTERP_PCT = 5.0
+
 _debug_log_path: Path | None = None
 
 
@@ -747,20 +767,37 @@ def run_pipeline(
     # "ancorada", só que no lugar errado).
     measured = by_source["anchor"] + by_source["fuzzy"]
     wrecall = measured / max(len(word_timings), 1)
+    # A letra sincronizada segurou o alinhamento? Ver LRC_RESCUE_INTERP_PCT.
+    lrc_carried = by_source["lrc"] > 0 and pct <= LRC_RESCUE_INTERP_PCT
     if wrecall < WHISPER_RECALL_FLOOR and pct <= ALIGNMENT_FAILED_PCT:
         # o "pct <= ..." evita avisar duas vezes a mesma música (se o interp já
         # disparou o alarme forte acima, não repete)
-        console.print(
-            f"[bold red]ATENÇÃO[/bold red] O reconhecimento da letra ficou baixo "
-            f"({100*wrecall:.0f}% das palavras) - o Whisper pode ter entendido outra "
-            "coisa e ancorado no lugar errado. O pacote pode sair fora de sincronia."
-        )
-        console.print(
-            "    [yellow]Vale conferir a sincronia e, se estiver ruim, GERAR DE NOVO "
-            "(a separação de voz varia a cada tentativa). Confira também se a letra bate "
-            "com ESTA gravação.[/yellow]"
-        )
-        debug_log(f"WORD-RECALL BAIXO: {100*wrecall:.0f}% (âncoras podem estar erradas)")
+        if lrc_carried:
+            # Recall baixo, mas quase nada foi estimado E o .lrc entrou: o risco
+            # que este aviso descreve (ancorar no lugar errado) foi justamente o
+            # que o .lrc corrigiu, demovendo âncoras implausíveis. Informa, sem
+            # alarme - um vermelho aqui seria treinar o usuário a ignorá-lo.
+            console.print(
+                f"[green]OK[/green] O Whisper reconheceu pouco ({100*wrecall:.0f}% das "
+                f"palavras), mas a letra sincronizada foi aceita e segurou o alinhamento "
+                f"({by_source['lrc']} inícios de linha, {pct:.1f}% estimadas)."
+            )
+            debug_log(
+                f"WORD-RECALL BAIXO: {100*wrecall:.0f}% - coberto pelo .lrc "
+                f"({by_source['lrc']} inícios de linha, {pct:.1f}% interpoladas)"
+            )
+        else:
+            console.print(
+                f"[bold red]ATENÇÃO[/bold red] O reconhecimento da letra ficou baixo "
+                f"({100*wrecall:.0f}% das palavras) - o Whisper pode ter entendido outra "
+                "coisa e ancorado no lugar errado. O pacote pode sair fora de sincronia."
+            )
+            console.print(
+                "    [yellow]Vale conferir a sincronia e, se estiver ruim, GERAR DE NOVO "
+                "(a separação de voz varia a cada tentativa). Confira também se a letra bate "
+                "com ESTA gravação.[/yellow]"
+            )
+            debug_log(f"WORD-RECALL BAIXO: {100*wrecall:.0f}% (âncoras podem estar erradas)")
 
     # Checagem de cobertura: avisa se a letra termina muito antes do áudio
     # (refrão repetido escrito só uma vez - erro comum de letras "(2x)").
