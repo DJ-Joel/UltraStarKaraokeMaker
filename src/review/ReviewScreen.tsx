@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke, convertFileSrc } from "@tauri-apps/api/tauri";
 import { ask } from "@tauri-apps/api/dialog";
 import { useI18n } from "../i18n";
+import LyricTimingPanel from "./LyricTimingPanel";
+import { buildTimingRows } from "./lrcTiming";
 
 // USKMaker - Fase 4: tela de revisão manual do alinhamento (estilo Yass).
 //
@@ -119,6 +121,8 @@ interface ReviewData {
   audioPath: string | null;
   vocalsPath: string | null;
   outDir: string;
+  /** Raw _synced_lyrics.lrc of the package, when the package still has one. */
+  syncedLyrics: string | null;
 }
 
 interface SaveResult {
@@ -224,6 +228,12 @@ export default function ReviewScreen({ outDir, onClose }: Props) {
   const [song, setSong] = useState<USSong | null>(null);
   const [audioPath, setAudioPath] = useState<string | null>(null);
   const [vocalsPath, setVocalsPath] = useState<string | null>(null);
+  // Lyric timing table: the package's original .lrc, whether the panel is
+  // open, and the times the user typed (kept here so closing the panel does
+  // not throw the typing away).
+  const [syncedLyrics, setSyncedLyrics] = useState<string | null>(null);
+  const [showTiming, setShowTiming] = useState(false);
+  const [lyricFixes, setLyricFixes] = useState<Record<number, string>>({});
   const [audioChoice, setAudioChoice] = useState<"mix" | "vocals">("mix");
   const [selected, setSelected] = useState<number | null>(null);
   // Seleção múltipla (issue #11): size<=1 = comportamento de sempre (inspector
@@ -284,6 +294,7 @@ export default function ReviewScreen({ outDir, onClose }: Props) {
         setSong(data.song);
         setAudioPath(data.audioPath);
         setVocalsPath(data.vocalsPath);
+        setSyncedLyrics(data.syncedLyrics ?? null);
         if (!data.audioPath && data.vocalsPath) setAudioChoice("vocals");
         // enquadra o início da música (primeira nota - 1s)
         if (data.song.notes.length > 0) {
@@ -823,6 +834,20 @@ export default function ReviewScreen({ outDir, onClose }: Props) {
 
   // versos derivados (painel lateral de navegação)
   const verses = useMemo(() => (song ? deriveVerses(song, t("revNoText")) : []), [song, t]);
+
+  // Linhas da tabela "Tempos da letra": cada linha do .lrc do LRCLIB ao lado
+  // do que a IA realmente mediu naquele verso. Só existe quando o pacote
+  // ainda tem o _synced_lyrics.lrc.
+  const timingRows = useMemo(() => {
+    if (!song || !syncedLyrics) return [];
+    return buildTimingRows(syncedLyrics, verses, song.notes, (beat) =>
+      beatToSec(song, beat)
+    );
+  }, [song, syncedLyrics, verses]);
+  const timingSuspectCount = useMemo(
+    () => timingRows.filter((r) => r.suspect).length,
+    [timingRows]
+  );
   const versesRef = useRef<Verse[]>([]);
   versesRef.current = verses;
 
@@ -936,6 +961,18 @@ export default function ReviewScreen({ outDir, onClose }: Props) {
     },
     [draw]
   );
+
+  // Usado pela tabela de tempos: posiciona e TOCA a partir de um segundo
+  // qualquer (o seekTo só posiciona). Limpa o playUntil pra não herdar a
+  // parada automática do "tocar só esta nota".
+  const playFrom = useCallback((sec: number) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    playUntilRef.current = null;
+    audio.currentTime = Math.max(0, sec);
+    audio.play();
+    draw();
+  }, [draw]);
 
   const playNote = useCallback(
     (idx: number) => {
@@ -1637,6 +1674,15 @@ export default function ReviewScreen({ outDir, onClose }: Props) {
           <button className="secondary" onClick={handleClose}>
             {t("revClose")}
           </button>
+          <button
+            className="secondary"
+            title={timingRows.length > 0 ? t("ltButtonHint") : t("ltNoLrc")}
+            onClick={() => setShowTiming(true)}
+            disabled={timingRows.length === 0}
+          >
+            {t("ltButton")}
+            {timingSuspectCount > 0 ? ` (${timingSuspectCount})` : ""}
+          </button>
           <button className="submit-button compact" onClick={handleSave} disabled={saving || !dirty}>
             {saving ? t("revSaving") : t("revSave")}
           </button>
@@ -1929,6 +1975,18 @@ export default function ReviewScreen({ outDir, onClose }: Props) {
         </div>
       )}
       {!currentAudioFile && <div className="error-box">{t("revNoAudio")}</div>}
+
+      {showTiming && (
+        <LyricTimingPanel
+          rows={timingRows}
+          corrections={lyricFixes}
+          onCorrectionChange={(idx, raw) =>
+            setLyricFixes((prev) => ({ ...prev, [idx]: raw }))
+          }
+          onPlayFrom={playFrom}
+          onClose={() => setShowTiming(false)}
+        />
+      )}
 
       <audio
         ref={audioRef}

@@ -982,6 +982,11 @@ struct ReviewData {
     /// facilita muito conferir o timing das sílabas.
     vocals_path: Option<String>,
     out_dir: String,
+    /// Conteúdo bruto do _synced_lyrics.lrc do pacote (LRCLIB), se existir -
+    /// a tabela "Tempos da letra" compara esses tempos com o que a IA mediu.
+    /// None quando o pacote foi gerado sem letra sincronizada ou os
+    /// auxiliares foram apagados.
+    synced_lyrics: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1132,11 +1137,16 @@ fn load_song(out_dir: String, lang: String) -> Result<ReviewData, String> {
         }
     }
 
+    // Letra sincronizada original do pacote: usada só para leitura, na tabela
+    // de conferência de tempos. Ausência não é erro.
+    let synced_lyrics = std::fs::read_to_string(dir.join("_synced_lyrics.lrc")).ok();
+
     Ok(ReviewData {
         song,
         audio_path,
         vocals_path,
         out_dir: dir.to_string_lossy().to_string(),
+        synced_lyrics,
     })
 }
 
