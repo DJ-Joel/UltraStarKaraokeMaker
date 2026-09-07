@@ -9,6 +9,7 @@ import { isPermissionGranted, requestPermission, sendNotification } from "@tauri
 import { getVersion } from "@tauri-apps/api/app";
 import ReviewScreen from "./review/ReviewScreen";
 import { useI18n, StrKey } from "./i18n";
+import { isApprovedLrc } from "./review/lrcTiming";
 
 // USKMaker - tela principal.
 //
@@ -682,6 +683,30 @@ function App() {
     setLyricsSearching(true);
     setLyricsSearchMsg(null);
     try {
+      // ANTES do LRCLIB: uma letra APROVADA por ouvido (tela de revisão ->
+      // "Tempos da letra") já foi conferida NESTA gravação, então vale mais
+      // que qualquer palpite da base colaborativa. Existindo, nem consulta a
+      // internet - e o sidecar reconhece a marca de aprovação e desliga as
+      // checagens de desconfiança (ver align.lrc_is_approved).
+      try {
+        const approved = await invoke<string | null>("load_approved_lyrics", {
+          artist: artist.trim(),
+          title: title.trim(),
+          lang,
+        });
+        const approvedText = approved?.trim() ?? "";
+        const approvedPlain = approvedText ? lrcToPlain(approvedText) : "";
+        if (approvedPlain) {
+          setLyricsText(approvedPlain);
+          setSyncedLyrics(approvedText);
+          setLyricsSearchMsg({ kind: "ok", text: t("lyricsApprovedUsed") });
+          return;
+        }
+      } catch {
+        // Biblioteca indisponível é perder um atalho, não a busca: segue
+        // normalmente para o LRCLIB.
+      }
+
       const resp = await httpFetch<LrclibTrack>("https://lrclib.net/api/get", {
         method: "GET",
         timeout: 20,
@@ -1057,7 +1082,10 @@ function App() {
     // a IA e costuma sair bem pior. Antes disto o usuario so descobria depois
     // de tres minutos de processamento. A checagem e a mesma; a diferenca e
     // que agora ela roda enquanto ainda da para trocar a letra.
-    if (!formErr && syncedLyrics && trackDuration && trackDuration > 0 &&
+    // Letra aprovada não passa por aqui: os tempos foram conferidos de
+    // ouvido nesta gravação, e o sidecar também não vai descartá-los.
+    if (!formErr && syncedLyrics && !isApprovedLrc(syncedLyrics) &&
+        trackDuration && trackDuration > 0 &&
         !lrcFitsAudio(syncedLyrics, trackDuration)) {
       const lastSung = lrcLastSungSecond(syncedLyrics);
       const ok = await ask(

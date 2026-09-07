@@ -377,6 +377,29 @@ def seed_line_anchors(
     return seeded
 
 
+_LRC_APPROVED_RE = re.compile(r"\[uskmapproved:\s*1\s*\]", re.IGNORECASE)
+
+
+def lrc_is_approved(text: str) -> bool:
+    """
+    Diz se este .lrc foi CONFERIDO DE OUVIDO pelo usuário na tela de revisão
+    (tabela "Tempos da letra") e gravado na biblioteca de letras aprovadas.
+
+    A marca é a tag `[uskmapproved:1]` que o app escreve no topo do arquivo.
+    Tag alfabética: o `parse_lrc` aqui do lado a ignora sozinho, então o mesmo
+    arquivo continua sendo um .lrc comum para todo o resto do código.
+
+    POR QUE ISSO MUDA TUDO: as defesas deste módulo (duração implícita, piso
+    de reconhecimento, demoção de âncoras) existem porque o LRCLIB é um palpite
+    de terceiros e pode ser de OUTRA gravação. Uma letra aprovada não é
+    palpite: uma pessoa ouviu a música e conferiu os inícios de linha nesta
+    gravação. Desconfiar dela seria trocar uma medida humana por uma
+    heurística - exatamente o contrário do que as heurísticas existem para
+    fazer.
+    """
+    return _LRC_APPROVED_RE.search(text) is not None
+
+
 def lrc_duration_mismatch(
     lrc_lines: list[tuple[float, str]],
     audio_duration: float,
@@ -1202,15 +1225,40 @@ def align_lyrics_to_audio(
     #     poluição de matches espúrios ANTES dela envenenar a interpolação
     #     ao redor), depois preenche os vãos que o Whisper não mediu.
     if synced_lyrics_path is not None and Path(synced_lyrics_path).exists():
-        lrc_lines = parse_lrc(Path(synced_lyrics_path).read_text(encoding="utf-8"))
+        lrc_text = Path(synced_lyrics_path).read_text(encoding="utf-8")
+        lrc_lines = parse_lrc(lrc_text)
         lyric_lines = _lyric_lines_with_start_index(lyrics_path)
         audio_duration = float(len(audio)) / 16000  # whisperx.audio.SAMPLE_RATE
+        approved = lrc_is_approved(lrc_text)
 
         # Guarda-chuva: o LRCLIB é buscado só por artista/título (sem
         # duração), pode devolver a letra de OUTRA gravação (ao vivo, remix,
         # edição estendida) - ver lrc_duration_mismatch. Medido: 66% das
         # letras encontradas na biblioteca gold divergiam >15s na duração.
-        if lrc_duration_mismatch(lrc_lines, audio_duration):
+        #
+        # Uma letra APROVADA pelo usuário pula essa checagem e todo o resto da
+        # desconfiança: ela foi conferida de ouvido NESTA gravação (ver
+        # lrc_is_approved).
+        if approved:
+            print(
+                "[INFO] Letra sincronizada APROVADA pelo usuário - os inícios de linha "
+                "conferidos de ouvido mandam sobre as âncoras do Whisper, e as checagens "
+                "de duração/reconhecimento não se aplicam."
+            )
+            # Semeia PRIMEIRO (mesma ordem do modo de baixo reconhecimento):
+            # os inícios aprovados entram como verdade e passam a limitar as
+            # janelas do realinhamento; a demoção depois limpa as âncoras do
+            # Whisper que brigam com eles.
+            seeded = seed_line_anchors(anchors, lyric_lines, lrc_lines,
+                                       override_measured=True)
+            if seeded:
+                print(f"[INFO] Letra aprovada: {seeded} inícios de linha semeados (prioritários).")
+            demoted = demote_anchors_conflicting_with_lrc(
+                anchors, lyric_lines, lrc_lines, audio_duration=audio_duration
+            )
+            if demoted:
+                print(f"[INFO] Letra aprovada: {demoted} âncoras implausíveis demovidas.")
+        elif lrc_duration_mismatch(lrc_lines, audio_duration):
             print(
                 "[AVISO] Letra sincronizada (.lrc) ignorada: a duração implícita não bate "
                 "com a gravação baixada (provável versão diferente - ao vivo, remix, edição). "

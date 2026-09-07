@@ -232,6 +232,16 @@ export function formatTime(sec: number): string {
 }
 
 /**
+ * True when this .lrc carries the marker USKMaker writes on a set of line
+ * times a person checked by ear and approved. The sidecar looks for the same
+ * tag (pipeline/align.py, lrc_is_approved) - if you change it here, change it
+ * there too.
+ */
+export function isApprovedLrc(text: string): boolean {
+  return /\[uskmapproved:\s*1\s*\]/i.test(text);
+}
+
+/**
  * Reads the metadata tags USKMaker writes at the top of an approved .lrc.
  * `audioSeconds` is the length of the recording the times were checked
  * against - if the user later downloads a different version of the track, the

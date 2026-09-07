@@ -29,8 +29,11 @@ from pipeline.align import (
     SOURCE_FUZZY,
     SOURCE_INTERPOLATED,
     SOURCE_LRC,
+    lrc_duration_mismatch,
+    lrc_is_approved,
     measured_recall,
     seed_line_anchors,
+    timings_from_anchors,
 )
 
 
@@ -168,3 +171,76 @@ def test_quando_o_modo_liga(recall, esperado):
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))
+# ---------------------------------------------------------------------------
+# Letra APROVADA pelo usuário (tabela "Tempos da letra" da tela de revisão)
+#
+# Um .lrc aprovado não é palpite do LRCLIB: uma pessoa ouviu ESTA gravação e
+# conferiu os inícios de linha. Por isso ele pula as defesas que existem para
+# proteger de um palpite de terceiros. Estes testes trancam as três peças de
+# que esse caminho depende.
+# ---------------------------------------------------------------------------
+
+APPROVED_HEADER = "[ar:Ministry]\n[ti:Effigy]\n[uskmapproved:1]\n[uskmaudio:232.44]\n"
+
+
+def test_marca_de_aprovacao_e_reconhecida():
+    assert lrc_is_approved(APPROVED_HEADER + "[00:10.00]primeira linha\n")
+
+
+def test_lrc_normal_do_lrclib_nao_passa_por_aprovado():
+    """Sem a tag, nada muda - o caminho de sempre continua valendo."""
+    assert not lrc_is_approved("[ar:Ministry]\n[00:10.00]primeira linha\n")
+
+
+def test_marca_tolera_maiuscula_e_espaco():
+    assert lrc_is_approved("[USKMAPPROVED: 1 ]\n[00:10.00]x\n")
+
+
+def test_aprovada_seria_recusada_pela_checagem_de_duracao():
+    """
+    Justifica o pulo: os tempos aprovados podem ficar longe do fim do áudio
+    (música que termina em instrumental longo, por exemplo) e a checagem de
+    duração - certa para um palpite do LRCLIB - recusaria um arquivo que uma
+    pessoa conferiu de ouvido. Quem pula é o chamador; aqui só se registra
+    que sem o pulo a recusa aconteceria.
+    """
+    curta = [(10.0, "a"), (20.0, "b")]
+    assert lrc_duration_mismatch(curta, audio_duration=300.0)
+
+
+def test_aprovada_substitui_ancora_medida_no_inicio_da_linha():
+    """
+    O mecanismo em que a aprovação se apoia: no início de linha, o tempo
+    conferido de ouvido entra POR CIMA do que o Whisper mediu. Sem
+    override_measured, uma âncora errada do Whisper continuaria mandando -
+    que é exatamente o defeito que a aprovação existe para resolver.
+    """
+    anchors = [_anchor(45.2), None, _anchor(50.0), None]
+    seeded = seed_line_anchors(
+        anchors, LYRIC_LINES, LRC_LINES, override_measured=True
+    )
+    assert seeded == 2
+    assert anchors[0][0] == 10.0 and anchors[0][3] == SOURCE_LRC
+    assert anchors[2][0] == 20.0 and anchors[2][3] == SOURCE_LRC
+
+
+def test_inicios_aprovados_sobrevivem_ate_os_tempos_finais():
+    """
+    Os inícios semeados precisam CHEGAR na lista de tempos como âncoras: é
+    isso que limita a janela do realinhamento (passe 3), que só considera
+    corridas de palavras INTERPOLADAS entre duas medidas. Uma palavra do meio
+    da linha não pode, portanto, escapar para fora da sua linha.
+    """
+    anchors = [None, None, None, None]
+    seed_line_anchors(anchors, LYRIC_LINES, LRC_LINES, override_measured=True)
+    timings = timings_from_anchors(
+        anchors, ["primeira", "linha", "segunda", "linha"], language="pt",
+        audio_end=30.0,
+    )
+    assert timings[0].source == SOURCE_LRC and timings[0].start == 10.0
+    assert timings[2].source == SOURCE_LRC and timings[2].start == 20.0
+    # a palavra do meio ficou interpolada DENTRO da sua linha - o
+    # realinhamento vai recebê-la numa janela entre 10 s e 20 s, não solta
+    # pela música inteira
+    assert timings[1].source == SOURCE_INTERPOLATED
+    assert 10.0 <= timings[1].start <= 20.0
