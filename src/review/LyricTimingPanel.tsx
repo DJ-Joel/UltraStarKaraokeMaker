@@ -28,8 +28,26 @@ interface Props {
   onPause: () => void;
   /** Whether the review player is playing right now. */
   isPlaying: boolean;
+  /** True when this song already has an approved version in the library. */
+  hasApproved: boolean;
+  /** Length of the audio the approved times were checked against, if known. */
+  approvedAudioSeconds: number | null;
+  /** Length of the audio loaded right now, if known. */
+  audioSeconds: number | null;
+  /** Where the last save landed, for the confirmation line. */
+  approvedPath: string | null;
+  approvedError: string | null;
+  saving: boolean;
+  onSaveApproved: () => void;
   onClose: () => void;
 }
+
+/**
+ * How far the approved audio length may differ from the loaded file before the
+ * panel warns. Two seconds covers re-encoding and trimming noise; a different
+ * recording is normally out by far more than that.
+ */
+const AUDIO_LENGTH_TOLERANCE_S = 2.0;
 
 /** Start playback a moment before the line so the ear catches the attack. */
 const PRE_ROLL_S = 1.0;
@@ -41,6 +59,13 @@ export default function LyricTimingPanel({
   onPlayFrom,
   onPause,
   isPlaying,
+  hasApproved,
+  approvedAudioSeconds,
+  audioSeconds,
+  approvedPath,
+  approvedError,
+  saving,
+  onSaveApproved,
   onClose,
 }: Props) {
   const { t, lang } = useI18n();
@@ -74,6 +99,12 @@ export default function LyricTimingPanel({
   );
   const shown = onlySuspect ? rows.filter((r) => r.suspect) : rows;
 
+  const audioMismatch =
+    approvedAudioSeconds !== null &&
+    audioSeconds !== null &&
+    audioSeconds > 0 &&
+    Math.abs(approvedAudioSeconds - audioSeconds) > AUDIO_LENGTH_TOLERANCE_S;
+
   return (
     <div className="lt-backdrop" onClick={onClose}>
       <div className="lt-panel" onClick={(e) => e.stopPropagation()}>
@@ -85,6 +116,16 @@ export default function LyricTimingPanel({
         </div>
 
         <p className="lt-help">{t("ltHelp")}</p>
+
+        {hasApproved && <p className="lt-note ok">{t("ltApprovedLoaded")}</p>}
+        {audioMismatch && (
+          <p className="lt-note warn">
+            {t("ltApprovedAudioWarn", {
+              approved: formatTime(approvedAudioSeconds ?? 0),
+              current: formatTime(audioSeconds ?? 0),
+            })}
+          </p>
+        )}
 
         <div className="lt-toolbar">
           <span className="lt-summary">
@@ -210,7 +251,22 @@ export default function LyricTimingPanel({
           </table>
         </div>
 
-        <p className="lt-footer">{t("ltNotSavedYet")}</p>
+        <div className="lt-actions">
+          <button
+            className="submit-button compact"
+            title={t("ltSaveApprovedHint")}
+            onClick={onSaveApproved}
+            disabled={saving || rows.length === 0}
+          >
+            {saving ? t("ltSaving") : t("ltSaveApproved")}
+          </button>
+          {approvedPath && !approvedError && (
+            <span className="lt-note ok">
+              {t("ltSavedTo", { path: approvedPath })}
+            </span>
+          )}
+          {approvedError && <span className="lt-note bad">{approvedError}</span>}
+        </div>
       </div>
     </div>
   );

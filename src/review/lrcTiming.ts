@@ -231,6 +231,59 @@ export function formatTime(sec: number): string {
   return `${sign}${minutes}:${ss}`;
 }
 
+/**
+ * Reads the metadata tags USKMaker writes at the top of an approved .lrc.
+ * `audioSeconds` is the length of the recording the times were checked
+ * against - if the user later downloads a different version of the track, the
+ * approved times no longer describe it, and the panel says so.
+ */
+export function parseApprovedMeta(text: string): { audioSeconds: number | null } {
+  const m = /\[uskmaudio:([0-9]+(?:\.[0-9]+)?)\]/i.exec(text);
+  return { audioSeconds: m ? parseFloat(m[1]) : null };
+}
+
+/**
+ * Maps the lines of an approved .lrc back onto the table rows, so reopening
+ * the panel shows the times the user already approved.
+ *
+ * Matched by TEXT, not by position: the package's .lrc could have been
+ * refetched in the meantime, and lining the two up by row number would then
+ * silently move every correction onto the wrong line.
+ */
+export function approvedTimesForRows(
+  approvedText: string,
+  rows: TimingRow[]
+): Record<number, number> {
+  const approved = parseLrc(approvedText);
+  if (approved.length === 0 || rows.length === 0) return {};
+  const matched = matchInOrder(
+    rows.map((r) => normalizeLine(r.lrcText)),
+    approved.map((l) => normalizeLine(l.text))
+  );
+  const out: Record<number, number> = {};
+  approved.forEach((line, k) => {
+    const rowPos = matched[k];
+    if (rowPos === null) return;
+    out[rows[rowPos].lrcIndex] = line.time;
+  });
+  return out;
+}
+
+/**
+ * Formats seconds as m:ss.cc - two decimals, so a time read back from an
+ * approved file survives the round trip into the input box without being
+ * rounded to a tenth.
+ */
+export function formatTimeExact(sec: number): string {
+  if (!isFinite(sec) || sec < 0) return "0:00.00";
+  const cs = Math.round(sec * 100);
+  const minutes = Math.floor(cs / 6000);
+  const rest = cs % 6000;
+  const ss = String(Math.floor(rest / 100)).padStart(2, "0");
+  const hundredths = String(rest % 100).padStart(2, "0");
+  return `${minutes}:${ss}.${hundredths}`;
+}
+
 /** Formats a difference in seconds, always signed ("+2.5"/"-1.0"). */
 export function formatGap(gap: number, decimalComma: boolean): string {
   const v = gap.toFixed(1);

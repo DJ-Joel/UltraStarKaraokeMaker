@@ -1382,8 +1382,28 @@ body { overflow: hidden; }
   font-variant-numeric: tabular-nums;
   font-size: 0.8rem;
 }
-.lt-footer {
-  color: #9a9aa8;
-  font-size: 0.8rem;
-  margin: 0.6rem 0 0.2rem;
+.lt-note {
+  font-size: 0.82rem;
+  line-height: 1.4;
+  margin: 0.2rem 0 0.5rem;
+}
+.lt-note.ok {
+  color: #8fbf8f;
+}
+.lt-note.warn {
+  color: #e0a05a;
+}
+.lt-note.bad {
+  color: #e07a6a;
+}
+.lt-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+  margin: 0.7rem 0 0.2rem;
+}
+.lt-actions .lt-note {
+  margin: 0;
+  word-break: break-all;
 }

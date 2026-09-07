@@ -3,7 +3,13 @@ import { invoke, convertFileSrc } from "@tauri-apps/api/tauri";
 import { ask } from "@tauri-apps/api/dialog";
 import { useI18n } from "../i18n";
 import LyricTimingPanel from "./LyricTimingPanel";
-import { buildTimingRows } from "./lrcTiming";
+import {
+  approvedTimesForRows,
+  buildTimingRows,
+  formatTimeExact,
+  parseApprovedMeta,
+  parseTimeInput,
+} from "./lrcTiming";
 
 // USKMaker - Fase 4: tela de revisão manual do alinhamento (estilo Yass).
 //
@@ -234,6 +240,12 @@ export default function ReviewScreen({ outDir, onClose }: Props) {
   const [syncedLyrics, setSyncedLyrics] = useState<string | null>(null);
   const [showTiming, setShowTiming] = useState(false);
   const [lyricFixes, setLyricFixes] = useState<Record<number, string>>({});
+  // Versão aprovada desta música na biblioteca (%LOCALAPPDATA%\USKMaker\
+  // approved-lyrics), se já existir - null = ainda não aprovada.
+  const [approvedText, setApprovedText] = useState<string | null>(null);
+  const [approvedPath, setApprovedPath] = useState<string | null>(null);
+  const [savingApproved, setSavingApproved] = useState(false);
+  const [approvedError, setApprovedError] = useState<string | null>(null);
   const [audioChoice, setAudioChoice] = useState<"mix" | "vocals">("mix");
   const [selected, setSelected] = useState<number | null>(null);
   // Seleção múltipla (issue #11): size<=1 = comportamento de sempre (inspector
@@ -283,6 +295,29 @@ export default function ReviewScreen({ outDir, onClose }: Props) {
   songRef.current = song;
   selectedRef.current = selected;
   multiSelectedRef.current = multiSelected;
+
+  // Busca a versão aprovada assim que artista/título são conhecidos. Não
+  // achar é o caso normal (a maioria das músicas nunca foi conferida), então
+  // erro aqui só apaga o estado - nunca atrapalha a revisão.
+  useEffect(() => {
+    if (!song) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const text = await invoke<string | null>("load_approved_lyrics", {
+          artist: song.artist,
+          title: song.title,
+          lang,
+        });
+        if (!cancelled) setApprovedText(text ?? null);
+      } catch {
+        if (!cancelled) setApprovedText(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [song?.artist, song?.title, lang]);
 
   // ---------------------------------------------------------------- carga
   useEffect(() => {
@@ -848,6 +883,66 @@ export default function ReviewScreen({ outDir, onClose }: Props) {
     () => timingRows.filter((r) => r.suspect).length,
     [timingRows]
   );
+
+  // Preenche a coluna "tempo correto" com o que já foi aprovado antes, só
+  // onde o tempo aprovado DIFERE do .lrc do pacote - assim a tabela continua
+  // sendo uma comparação, e o que o usuário digitou não se perde.
+  useEffect(() => {
+    if (!approvedText || timingRows.length === 0) return;
+    const times = approvedTimesForRows(approvedText, timingRows);
+    setLyricFixes((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const row of timingRows) {
+        const t = times[row.lrcIndex];
+        if (t === undefined) continue;
+        if (Math.abs(t - row.lrcTime) <= 0.05) continue;
+        if (next[row.lrcIndex] !== undefined) continue;
+        next[row.lrcIndex] = formatTimeExact(t);
+        changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [approvedText, timingRows]);
+
+  // Duração do áudio conferido quando a aprovação foi salva, se houver.
+  const approvedAudioSeconds = useMemo(
+    () => (approvedText ? parseApprovedMeta(approvedText).audioSeconds : null),
+    [approvedText]
+  );
+
+  const handleSaveApproved = useCallback(async () => {
+    const s0 = songRef.current;
+    if (!s0 || timingRows.length === 0) return;
+    setSavingApproved(true);
+    setApprovedError(null);
+    try {
+      const lines = timingRows.map((r) => {
+        const typed = parseTimeInput(lyricFixes[r.lrcIndex] ?? "");
+        return { time: typed ?? r.lrcTime, text: r.lrcText };
+      });
+      const path = await invoke<string>("save_approved_lyrics", {
+        artist: s0.artist,
+        title: s0.title,
+        lines,
+        audioSeconds: peaksRef.current?.duration ?? 0,
+        lang,
+      });
+      setApprovedPath(path);
+      // Relê o que acabou de ser gravado: o painel passa a mostrar o estado
+      // real do arquivo, não uma suposição do que foi enviado.
+      const text = await invoke<string | null>("load_approved_lyrics", {
+        artist: s0.artist,
+        title: s0.title,
+        lang,
+      });
+      setApprovedText(text ?? null);
+    } catch (err) {
+      setApprovedError(typeof err === "string" ? err : t("ltSaveError"));
+    } finally {
+      setSavingApproved(false);
+    }
+  }, [timingRows, lyricFixes, lang, t]);
   const versesRef = useRef<Verse[]>([]);
   versesRef.current = verses;
 
@@ -1994,6 +2089,13 @@ export default function ReviewScreen({ outDir, onClose }: Props) {
           onPlayFrom={playFrom}
           onPause={pausePlayback}
           isPlaying={playing}
+          hasApproved={approvedText !== null}
+          approvedAudioSeconds={approvedAudioSeconds}
+          audioSeconds={peaksRef.current?.duration ?? null}
+          approvedPath={approvedPath}
+          approvedError={approvedError}
+          saving={savingApproved}
+          onSaveApproved={handleSaveApproved}
           onClose={() => setShowTiming(false)}
         />
       )}

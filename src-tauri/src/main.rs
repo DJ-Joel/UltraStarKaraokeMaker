@@ -972,6 +972,119 @@ async fn setup_environment(app: tauri::AppHandle, window: Window, lang: String) 
 // código já validado - nada de segunda implementação do formato.
 // ---------------------------------------------------------------------------
 
+
+// ---------------------------------------------------------------------------
+// Biblioteca de tempos de letra APROVADOS pelo usuário.
+//
+// A tabela "Tempos da letra" da tela de revisão deixa o usuário conferir de
+// ouvido os inícios de linha e corrigir os que estão errados. O resultado é
+// gravado aqui, FORA da pasta do pacote de propósito: apagar ou regerar a
+// música não pode jogar fora um trabalho que a pessoa fez com o ouvido.
+//
+// Formato: .lrc comum (o mesmo que o sidecar já sabe ler), com tags extras de
+// metadado. As tags são alfabéticas, então o parse_lrc do sidecar as ignora
+// sozinho - nada precisou mudar lá para o arquivo ser legível.
+// ---------------------------------------------------------------------------
+
+/// `%LOCALAPPDATA%\USKMaker\approved-lyrics` - um .lrc por música.
+fn approved_lyrics_dir(lang: &str) -> Result<PathBuf, String> {
+    let local_app_data =
+        std::env::var("LOCALAPPDATA").map_err(|_| tr(lang, "localappdata").to_string())?;
+    Ok(Path::new(&local_app_data)
+        .join("USKMaker")
+        .join("approved-lyrics"))
+}
+
+/// Nome de arquivo estável para uma música: "artista - título" em minúsculas,
+/// com tudo que não é letra ou dígito virando "-". Mantém a biblioteca
+/// legível a olho e o nome seguro no Windows.
+fn approved_key(artist: &str, title: &str) -> String {
+    let raw = format!("{} - {}", artist.trim(), title.trim()).to_lowercase();
+    let mut out = String::new();
+    let mut last_dash = true; // começa true pra não abrir com "-"
+    for ch in raw.chars() {
+        if ch.is_alphanumeric() {
+            out.push(ch);
+            last_dash = false;
+        } else if !last_dash {
+            out.push('-');
+            last_dash = true;
+        }
+    }
+    while out.ends_with('-') {
+        out.pop();
+    }
+    if out.is_empty() {
+        out.push_str("song");
+    }
+    out
+}
+
+/// Formata segundos como o timestamp do .lrc: [mm:ss.cc].
+fn lrc_stamp(seconds: f64) -> String {
+    let s = if seconds.is_finite() && seconds > 0.0 { seconds } else { 0.0 };
+    let total_cs = (s * 100.0).round() as u64;
+    let minutes = total_cs / 6000;
+    let rest = total_cs % 6000;
+    format!("[{:02}:{:02}.{:02}]", minutes, rest / 100, rest % 100)
+}
+
+#[derive(Debug, Deserialize)]
+struct ApprovedLine {
+    time: f64,
+    text: String,
+}
+
+#[tauri::command]
+fn save_approved_lyrics(
+    artist: String,
+    title: String,
+    lines: Vec<ApprovedLine>,
+    audio_seconds: f64,
+    lang: String,
+) -> Result<String, String> {
+    let dir = approved_lyrics_dir(&lang)?;
+    std::fs::create_dir_all(&dir).map_err(|e| {
+        tr(&lang, "write_file")
+            .replace("{path}", &dir.display().to_string())
+            .replace("{err}", &e.to_string())
+    })?;
+    let path = dir.join(format!("{}.lrc", approved_key(&artist, &title)));
+
+    let mut out = String::new();
+    out.push_str(&format!("[ar:{}]\n", artist.trim()));
+    out.push_str(&format!("[ti:{}]\n", title.trim()));
+    // Marca de aprovação humana + a duração do áudio conferido: se a pessoa
+    // baixar OUTRA gravação depois, dá pra avisar em vez de aplicar tempos
+    // que não valem mais para aquele arquivo.
+    out.push_str("[uskmapproved:1]\n");
+    out.push_str(&format!("[uskmaudio:{:.2}]\n", audio_seconds.max(0.0)));
+    for line in &lines {
+        out.push_str(&lrc_stamp(line.time));
+        out.push_str(line.text.trim());
+        out.push('\n');
+    }
+
+    std::fs::write(&path, out).map_err(|e| {
+        tr(&lang, "write_file")
+            .replace("{path}", &path.display().to_string())
+            .replace("{err}", &e.to_string())
+    })?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// Conteúdo do .lrc aprovado desta música, ou None se ainda não existe.
+/// Ausência não é erro - é o caso normal.
+#[tauri::command]
+fn load_approved_lyrics(
+    artist: String,
+    title: String,
+    lang: String,
+) -> Result<Option<String>, String> {
+    let path = approved_lyrics_dir(&lang)?.join(format!("{}.lrc", approved_key(&artist, &title)));
+    Ok(std::fs::read_to_string(&path).ok())
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ReviewData {
@@ -1544,6 +1657,8 @@ fn main() {
             regenerate_video,
             fetch_video_info,
             update_ytdlp,
+            save_approved_lyrics,
+            load_approved_lyrics,
             setup_environment
         ])
         .build(tauri::generate_context!())
