@@ -39,8 +39,14 @@ def test_titulo_limpo_passa_intacto():
 
 
 def test_nao_come_parenteses_que_fazem_parte_do_nome():
-    """"(Us Do Part)" é parte do nome da música do Front 242, não ruído."""
-    assert "Us Do Part" in strip_title_noise("Until Death (Us Do Part)")
+    """
+    "(Us Do Part)" é parte do nome da música do Front 242, não ruído.
+
+    Este teste conferia só se o MIOLO sobrevivia (`"Us Do Part" in ...`) - e
+    por isso passou verdinho enquanto o parêntese que FECHA era comido. A
+    igualdade completa é o que realmente tranca o comportamento.
+    """
+    assert strip_title_noise("Until Death (Us Do Part)") == "Until Death (Us Do Part)"
 
 
 def test_titulo_vazio_nao_quebra():
@@ -189,3 +195,55 @@ def test_nao_deixa_casca_de_parentese_vazio():
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))
+# ---------------------------------------------------------------------------
+# Parêntese/colchete que FECHA o nome da música
+#
+# BUG REAL (07/09/2026, relatado pelo usuário): "Ministry - Effigy (Im Not
+# An)" chegava ao formulário como "Effigy (Im Not An" - sem o fecha-parêntese.
+# A limpeza terminava com `.strip(" -–—|~·.,()[]")`, que come parêntese de
+# ponta seja ele casca ou parte do nome. O título truncado ia para a consulta
+# do LRCLIB, para o nome da pasta e para o .txt gerado.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("cru,limpo", [
+    ("Effigy (Im Not An)", "Effigy (Im Not An)"),
+    ("Play with Me (Jane) [7 Edit]", "Play with Me (Jane) [7 Edit]"),
+    ("Have In Mind (Extended Mix)", "Have In Mind (Extended Mix)"),
+    ("Angel 07 (Extended Version)", "Angel 07 (Extended Version)"),
+])
+def test_o_parentese_que_fecha_o_nome_fica(cru, limpo):
+    assert strip_title_noise(cru) == limpo
+
+
+@pytest.mark.parametrize("cru,limpo", [
+    ("Song (", "Song"),
+    ("Song )", "Song"),
+    ("Song ]", "Song"),
+    (") Song", "Song"),
+])
+def test_casca_de_parentese_sem_par_sai(cru, limpo):
+    """Sem par, é sobra da remoção do ruído - não faz parte do nome."""
+    assert strip_title_noise(cru) == limpo
+
+
+def test_titulo_inteiro_entre_parenteses_fica_como_esta():
+    """Estão em par: é o nome escrito assim, não casca."""
+    assert strip_title_noise("(Reprise)") == "(Reprise)"
+
+
+def test_o_ruido_ainda_sai_de_um_titulo_com_parenteses_de_verdade():
+    """O nome entre parênteses fica; o "(Official Video)" continua saindo."""
+    assert strip_title_noise("Effigy (Im Not An) (Official Video)") == "Effigy (Im Not An)"
+
+
+def test_divisao_devolve_o_titulo_completo():
+    """O caso do usuário, ponta a ponta."""
+    assert split_artist_title("Ministry - Effigy (Im Not An) (Official Audio)") == (
+        "Ministry",
+        "Effigy (Im Not An)",
+    )
+
+
+def test_visualiser_britanico_tambem_e_ruido():
+    """Caso real da biblioteca do usuário - a lista só tinha "visualizer"."""
+    assert strip_title_noise("Freedom! 90 [Official Visualiser]") == "Freedom! 90"

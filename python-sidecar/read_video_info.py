@@ -34,8 +34,8 @@ import sys
 _NOISE_PATTERNS = (
     r"\(\s*(?:official\s*)?(?:music\s*)?video\s*\)",
     r"\[\s*(?:official\s*)?(?:music\s*)?video\s*\]",
-    r"\(\s*official\s*(?:audio|lyric[s]?|visualizer)?\s*\)",
-    r"\[\s*official\s*(?:audio|lyric[s]?|visualizer)?\s*\]",
+    r"\(\s*official\s*(?:audio|lyric[s]?|visuali[sz]er)?\s*\)",
+    r"\[\s*official\s*(?:audio|lyric[s]?|visuali[sz]er)?\s*\]",
     r"\(\s*lyric[s]?(?:\s*video)?\s*\)",
     r"\[\s*lyric[s]?(?:\s*video)?\s*\]",
     r"\(\s*audio\s*\)",
@@ -54,6 +54,44 @@ _NOISE_PATTERNS = (
 _TITLE_SEPARATORS = (" - ", " – ", " — ", " | ", " ~ ")
 
 
+# Pontuação de sobra que pode ficar nas pontas depois de tirar o ruído.
+# Parênteses e colchetes NÃO entram aqui - ver _drop_unbalanced_brackets.
+_TRIM_CHARS = " -–—|~·.,"
+
+# Cada parêntese/colchete e o seu par - usado para decidir se um deles, numa
+# das pontas, é casca solta ou parte do nome da música.
+_BRACKET_PAIR = {"(": ")", ")": "(", "[": "]", "]": "["}
+
+
+def _drop_unbalanced_brackets(text: str) -> str:
+    """
+    Tira SÓ a casca de parêntese/colchete que ficou sem par nas pontas.
+
+    BUG REAL (07/09/2026, "Ministry - Effigy (Im Not An)"): a limpeza antiga
+    terminava com `.strip(" -–—|~·.,()[]")`, que come qualquer parêntese das
+    pontas - inclusive o que FECHA um nome legítimo. Todo título terminado em
+    ")" chegava truncado ao formulário ("Effigy (Im Not An"), e daí para a
+    consulta do LRCLIB, para o nome da pasta e para o .txt gerado. O teste que
+    existia para isso ("Until Death (Us Do Part)") só conferia se o miolo
+    sobrevivia, então o erro passou despercebido.
+
+    Agora um fecha-parêntese só sai se não houver abre-parêntese para ele (e
+    vice-versa) - que é o caso de casca de verdade, deixada pela remoção do
+    ruído.
+    """
+    out = text
+    while True:
+        if out and out[-1] in _BRACKET_PAIR:
+            if out.count(_BRACKET_PAIR[out[-1]]) < out.count(out[-1]):
+                out = out[:-1].rstrip(_TRIM_CHARS)
+                continue
+        if out and out[0] in _BRACKET_PAIR:
+            if out.count(_BRACKET_PAIR[out[0]]) < out.count(out[0]):
+                out = out[1:].lstrip(_TRIM_CHARS)
+                continue
+        return out
+
+
 def strip_title_noise(text: str) -> str:
     """Tira "(Official Video)", "[HD]", "(Remastered 2019)" e afins."""
     out = text
@@ -65,7 +103,8 @@ def strip_title_noise(text: str) -> str:
     out = re.sub(r"[\(\[]\s*[\)\]]", " ", out)
     # sobra de pontuação e espaço duplicado depois das remoções
     out = re.sub(r"\s{2,}", " ", out)
-    return out.strip(" -–—|~·.,()[]").strip()
+    out = out.strip(_TRIM_CHARS)
+    return _drop_unbalanced_brackets(out).strip()
 
 
 def split_artist_title(video_title: str) -> tuple[str | None, str | None]:
