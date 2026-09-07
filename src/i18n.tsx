@@ -285,6 +285,10 @@ const STRINGS = {
     revLoadError: "Erro ao carregar o pacote.",
     revSaveError: "Erro ao salvar.",
     revConfirmDiscard: "Há alterações não salvas. Sair mesmo assim e descartá-las?",
+    revToForm: "Gerar de novo",
+    revToFormHint: "Devolve esta música ao formulário principal - nome e link já preenchidos - para gerar outra vez.",
+    revToFormDone: "Música devolvida ao formulário. Clique em \u201cBuscar letra\u201d e depois em gerar.",
+    revToFormDoneNoUrl: "Nome preenchido. O link de origem não estava no log - cole-o antes de gerar.",
     revNoText: "(sem texto)",
 
     // ---- tabela de tempos da letra (conferência do .lrc) ----
@@ -584,6 +588,10 @@ const STRINGS = {
     revLoadError: "Error loading the package.",
     revSaveError: "Error while saving.",
     revConfirmDiscard: "There are unsaved changes. Leave anyway and discard them?",
+    revToForm: "Generate again",
+    revToFormHint: "Sends this song back to the main form - name and link already filled in - so it can be generated again.",
+    revToFormDone: "Song sent back to the form. Press \u201cSearch lyrics\u201d, then generate.",
+    revToFormDoneNoUrl: "Name filled in. The source link was not in the log - paste it before generating.",
     revNoText: "(no text)",
 
     // ---- lyric timing table (.lrc checking) ----

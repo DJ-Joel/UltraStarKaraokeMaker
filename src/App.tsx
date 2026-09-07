@@ -1224,7 +1224,31 @@ function App() {
   }
 
   if (reviewDir) {
-    return <ReviewScreen outDir={reviewDir} onClose={() => setReviewDir(null)} />;
+    return (
+      <ReviewScreen
+        outDir={reviewDir}
+        onClose={() => setReviewDir(null)}
+        onSendToForm={(d) => {
+          // Volta ao formulário já preenchido: nome, e o link quando ele pôde
+          // ser recuperado do log. A letra é LIMPA de propósito - o passo
+          // seguinte é "Buscar letra", que traz a versão APROVADA se existir.
+          setArtist(d.artist);
+          setTitle(d.title);
+          if (d.sourceUrl) {
+            setSourceMode("youtube");
+            setYoutubeUrl(d.sourceUrl);
+          }
+          setLyricsText("");
+          setSyncedLyrics(null);
+          setTrackDuration(null);
+          setLyricsSearchMsg({
+            kind: "ok",
+            text: d.sourceUrl ? t("revToFormDone") : t("revToFormDoneNoUrl"),
+          });
+          setReviewDir(null);
+        }}
+      />
+    );
   }
 
   // Painel de análise do pacote escolhido: sugere baixar capa/fundo/vídeo que

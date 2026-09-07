@@ -1100,6 +1100,10 @@ struct ReviewData {
     /// None quando o pacote foi gerado sem letra sincronizada ou os
     /// auxiliares foram apagados.
     synced_lyrics: Option<String>,
+    /// Link de origem do pacote, recuperado do log - deixa a tela de revisão
+    /// devolver a música ao formulário sem o usuário procurar o link de novo.
+    /// None quando a origem foi arquivo local ou o log já foi apagado.
+    source_url: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1218,6 +1222,29 @@ fn analyze_package(dir: String) -> PackageAnalysis {
     none()
 }
 
+/// Melhor esforço para lembrar de ONDE veio um pacote já gerado.
+///
+/// O link não é gravado em lugar nenhum de propósito - mas o yt-dlp imprime
+/// "[youtube] Extracting URL: <link>" no log do processo, e o log fica na
+/// pasta. Ler dali resolve o caso real do usuário: depois de gerar, o
+/// formulário é limpo e recuperar o link significava ir caçar no navegador.
+///
+/// Falhar aqui não é erro: origem em arquivo local não deixa essa linha, e o
+/// log some se o usuário marcou "remover intermediários". O botão então
+/// devolve só artista e título.
+fn read_source_url(dir: &Path) -> Option<String> {
+    let log = std::fs::read_to_string(dir.join("_process_output.log")).ok()?;
+    for line in log.lines() {
+        if let Some((_, rest)) = line.split_once("Extracting URL:") {
+            let url = rest.trim();
+            if url.starts_with("http") {
+                return Some(url.to_string());
+            }
+        }
+    }
+    None
+}
+
 #[tauri::command]
 fn load_song(out_dir: String, lang: String) -> Result<ReviewData, String> {
     let dir = PathBuf::from(&out_dir);
@@ -1260,6 +1287,7 @@ fn load_song(out_dir: String, lang: String) -> Result<ReviewData, String> {
         vocals_path,
         out_dir: dir.to_string_lossy().to_string(),
         synced_lyrics,
+        source_url: read_source_url(&dir),
     })
 }
 

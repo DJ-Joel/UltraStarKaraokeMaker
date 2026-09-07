@@ -129,6 +129,8 @@ interface ReviewData {
   outDir: string;
   /** Raw _synced_lyrics.lrc of the package, when the package still has one. */
   syncedLyrics: string | null;
+  /** Link this package was generated from, when it can still be recovered. */
+  sourceUrl: string | null;
 }
 
 interface SaveResult {
@@ -139,6 +141,16 @@ interface SaveResult {
 interface Props {
   outDir: string;
   onClose: () => void;
+  /**
+   * Sends this song's details back to the main form so it can be generated
+   * again without hunting for the link and retyping the name. Optional: the
+   * review screen also opens from places where there is no form to fill.
+   */
+  onSendToForm?: (details: {
+    artist: string;
+    title: string;
+    sourceUrl: string | null;
+  }) => void;
 }
 
 // ---- conversões beat <-> segundos (fórmula oficial do UltraStar:
@@ -229,7 +241,7 @@ type DragMode =
   // Retângulo de seleção (Shift+arraste no fundo do piano roll).
   | { kind: "rubberband"; startX: number; startY: number; curX: number; curY: number };
 
-export default function ReviewScreen({ outDir, onClose }: Props) {
+export default function ReviewScreen({ outDir, onClose, onSendToForm }: Props) {
   const { t, lang } = useI18n();
   const [song, setSong] = useState<USSong | null>(null);
   const [audioPath, setAudioPath] = useState<string | null>(null);
@@ -238,6 +250,7 @@ export default function ReviewScreen({ outDir, onClose }: Props) {
   // open, and the times the user typed (kept here so closing the panel does
   // not throw the typing away).
   const [syncedLyrics, setSyncedLyrics] = useState<string | null>(null);
+  const [sourceUrl, setSourceUrl] = useState<string | null>(null);
   const [showTiming, setShowTiming] = useState(false);
   const [lyricFixes, setLyricFixes] = useState<Record<number, string>>({});
   // Versão aprovada desta música na biblioteca (%LOCALAPPDATA%\USKMaker\
@@ -330,6 +343,7 @@ export default function ReviewScreen({ outDir, onClose }: Props) {
         setAudioPath(data.audioPath);
         setVocalsPath(data.vocalsPath);
         setSyncedLyrics(data.syncedLyrics ?? null);
+        setSourceUrl(data.sourceUrl ?? null);
         if (!data.audioPath && data.vocalsPath) setAudioChoice("vocals");
         // enquadra o início da música (primeira nota - 1s)
         if (data.song.notes.length > 0) {
@@ -1069,6 +1083,18 @@ export default function ReviewScreen({ outDir, onClose }: Props) {
     draw();
   }, [draw]);
 
+  // Devolve a música ao formulário principal. Alterações não salvas pedem
+  // confirmação, igual a fechar: sair daqui descarta do mesmo jeito.
+  const handleSendToForm = useCallback(async () => {
+    const s0 = songRef.current;
+    if (!s0 || !onSendToForm) return;
+    if (dirty) {
+      const ok = await ask(t("revConfirmDiscard"), { title: "USKMaker" });
+      if (!ok) return;
+    }
+    onSendToForm({ artist: s0.artist, title: s0.title, sourceUrl });
+  }, [onSendToForm, dirty, sourceUrl, t]);
+
   // Para a reprodução - a tabela de tempos usa o mesmo botão pra tocar e parar.
   const pausePlayback = useCallback(() => {
     const audio = audioRef.current;
@@ -1777,6 +1803,15 @@ export default function ReviewScreen({ outDir, onClose }: Props) {
           <button className="secondary" onClick={handleClose}>
             {t("revClose")}
           </button>
+          {onSendToForm && (
+            <button
+              className="secondary"
+              title={t("revToFormHint")}
+              onClick={handleSendToForm}
+            >
+              {t("revToForm")}
+            </button>
+          )}
           <button
             className="secondary"
             title={timingRows.length > 0 ? t("ltButtonHint") : t("ltNoLrc")}
