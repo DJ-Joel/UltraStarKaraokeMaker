@@ -1344,6 +1344,11 @@ body { overflow: hidden; }
   border-color: #3a3a4a;
   background: #22222e;
 }
+.lt-time.playing {
+  border-color: #3d6fd6;
+  background: #1e2a44;
+  color: #dce6ff;
+}
 .lt-gap {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;

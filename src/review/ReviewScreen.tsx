@@ -974,6 +974,14 @@ export default function ReviewScreen({ outDir, onClose }: Props) {
     draw();
   }, [draw]);
 
+  // Para a reprodução - a tabela de tempos usa o mesmo botão pra tocar e parar.
+  const pausePlayback = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    playUntilRef.current = null;
+    audio.pause();
+  }, []);
+
   const playNote = useCallback(
     (idx: number) => {
       const s = songRef.current;
@@ -1984,6 +1992,8 @@ export default function ReviewScreen({ outDir, onClose }: Props) {
             setLyricFixes((prev) => ({ ...prev, [idx]: raw }))
           }
           onPlayFrom={playFrom}
+          onPause={pausePlayback}
+          isPlaying={playing}
           onClose={() => setShowTiming(false)}
         />
       )}

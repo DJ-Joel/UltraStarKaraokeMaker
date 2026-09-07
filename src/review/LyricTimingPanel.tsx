@@ -24,6 +24,10 @@ interface Props {
   onCorrectionChange: (lrcIndex: number, raw: string) => void;
   /** Seek the review player to this second (already offset by the caller). */
   onPlayFrom: (sec: number) => void;
+  /** Stop playback - the play buttons double as stop buttons. */
+  onPause: () => void;
+  /** Whether the review player is playing right now. */
+  isPlaying: boolean;
   onClose: () => void;
 }
 
@@ -35,11 +39,28 @@ export default function LyricTimingPanel({
   corrections,
   onCorrectionChange,
   onPlayFrom,
+  onPause,
+  isPlaying,
   onClose,
 }: Props) {
   const { t, lang } = useI18n();
   const [onlySuspect, setOnlySuspect] = useState(false);
+  // Which play button started the current playback ("<row>:lrc" or
+  // "<row>:heard"). Only that one turns into a stop button, and only while the
+  // player is actually running - if playback ends or is stopped elsewhere, the
+  // button goes back to ▶ on its own.
+  const [activeKey, setActiveKey] = useState<string | null>(null);
   const comma = lang === "pt";
+
+  const toggleFrom = (key: string, sec: number) => {
+    if (activeKey === key && isPlaying) {
+      onPause();
+      return;
+    }
+    setActiveKey(key);
+    onPlayFrom(sec);
+  };
+  const isStop = (key: string) => activeKey === key && isPlaying;
 
   const suspectCount = useMemo(
     () => rows.filter((r) => r.suspect).length,
@@ -110,13 +131,23 @@ export default function LyricTimingPanel({
                     <td className="lt-num">{r.lrcIndex + 1}</td>
                     <td>
                       <button
-                        className="lt-time"
-                        title={t("ltPlayHint")}
+                        className={
+                          isStop(`${r.lrcIndex}:lrc`) ? "lt-time playing" : "lt-time"
+                        }
+                        title={
+                          isStop(`${r.lrcIndex}:lrc`)
+                            ? t("ltStopHint")
+                            : t("ltPlayHint")
+                        }
                         onClick={() =>
-                          onPlayFrom(Math.max(0, r.lrcTime - PRE_ROLL_S))
+                          toggleFrom(
+                            `${r.lrcIndex}:lrc`,
+                            Math.max(0, r.lrcTime - PRE_ROLL_S)
+                          )
                         }
                       >
-                        ▶ {formatTime(r.lrcTime)}
+                        {isStop(`${r.lrcIndex}:lrc`) ? "⏸" : "▶"}{" "}
+                        {formatTime(r.lrcTime)}
                       </button>
                     </td>
                     <td>
@@ -124,13 +155,25 @@ export default function LyricTimingPanel({
                         <span className="lt-muted">—</span>
                       ) : (
                         <button
-                          className="lt-time"
-                          title={`${t("ltPlayHint")} (${r.heardSource ?? ""})`}
+                          className={
+                            isStop(`${r.lrcIndex}:heard`)
+                              ? "lt-time playing"
+                              : "lt-time"
+                          }
+                          title={`${
+                            isStop(`${r.lrcIndex}:heard`)
+                              ? t("ltStopHint")
+                              : t("ltPlayHint")
+                          } (${r.heardSource ?? ""})`}
                           onClick={() =>
-                            onPlayFrom(Math.max(0, (r.heardTime ?? 0) - PRE_ROLL_S))
+                            toggleFrom(
+                              `${r.lrcIndex}:heard`,
+                              Math.max(0, (r.heardTime ?? 0) - PRE_ROLL_S)
+                            )
                           }
                         >
-                          ▶ {formatTime(r.heardTime)}
+                          {isStop(`${r.lrcIndex}:heard`) ? "⏸" : "▶"}{" "}
+                          {formatTime(r.heardTime)}
                         </button>
                       )}
                     </td>
