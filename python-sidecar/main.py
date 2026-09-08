@@ -53,7 +53,7 @@ from pipeline.download import download_background_video, get_source_audio
 from pipeline.filenames import sanitize_filename
 from pipeline.metadata import fetch_metadata
 from pipeline.proc_utils import ensure_ffmpeg_on_path, ffmpeg_exe, run_subprocess
-from pipeline.separate import isolate_lead_vocal, separate_vocals
+from pipeline.separate import isolate_backing_vocals, isolate_lead_vocal, separate_vocals
 from pipeline.video_export import export_karaoke_video, ffmpeg_has_libass
 
 # Quando o stdout/stderr do Python não está conectado a um terminal real (é
@@ -280,6 +280,28 @@ def convert_audio(source_wav: Path, dest: Path, audio_format: str = "ogg",
     run_subprocess(cmd)
 
 
+def mix_backing_into_instrumental(instrumental: Path, backing: Path, dest: Path) -> None:
+    """
+    Soma as vozes de apoio de volta ao instrumental, no nível natural delas.
+
+    `normalize=0` é o detalhe que importa: por padrão o filtro amix divide
+    cada entrada pelo número de entradas, o que baixaria a música inteira
+    ~6 dB sem ninguém pedir. Medido em teste antes de entrar aqui: com um
+    stem de apoio SILENCIOSO, o volume médio da saída fica idêntico ao do
+    instrumental sozinho - prova de que nada foi atenuado no caminho.
+    """
+    cmd = [
+        ffmpeg_exe(), "-y",
+        "-i", str(instrumental),
+        "-i", str(backing),
+        "-filter_complex",
+        "[0:a][1:a]amix=inputs=2:duration=longest:normalize=0[out]",
+        "-map", "[out]",
+        str(dest),
+    ]
+    run_subprocess(cmd)
+
+
 def _make_romanize_converter(language: str):
     """
     Devolve uma função texto->texto pro idioma, ou None se não suportado.
@@ -423,6 +445,7 @@ def run_pipeline(
     backtrack: bool = False,
     transpose: int = 0,
     yarg_export: bool = False,
+    keep_harmonies: bool = False,
     mp4_export: bool = False,
     whisper_model: str = "auto",
     romanize: bool = False,
@@ -965,6 +988,28 @@ def run_pipeline(
     # fonte. Alinhamento/pitch usam o VOCAL e não são afetados. A qualidade é a
     # da separação do Demucs (nunca perfeita - pode sobrar resíduo de voz).
     audio_src = stems.instrumental if backtrack else source.audio_wav
+
+    # Harmonias de volta (opt-in): o Demucs tira TODA voz, inclusive o apoio.
+    # Aqui um segundo modelo separa voz principal de apoio DENTRO do stem
+    # vocal, e só o apoio volta pro instrumental. Não-fatal: se falhar, o
+    # pacote sai com o instrumental puro de sempre, como antes.
+    if backtrack and keep_harmonies:
+        console.print("[cyan]Recuperando vozes de apoio/harmonias...[/cyan]")
+        debug_log("HARMONIAS - iniciando isolate_backing_vocals")
+        try:
+            backing = isolate_backing_vocals(stems.vocals, work_path / "backing_vocals")
+            mixed = work_path / "instrumental_com_harmonias.wav"
+            mix_backing_into_instrumental(stems.instrumental, backing, mixed)
+            audio_src = mixed
+            debug_log(f"HARMONIAS - concluído. fonte do áudio final: {mixed}")
+            console.print("[green]OK[/green] Vozes de apoio somadas ao instrumental.")
+        except Exception as e:
+            debug_log(f"HARMONIAS - falhou (ignorado): {e}")
+            console.print(
+                f"[yellow]AVISO[/yellow] Não consegui recuperar as vozes de apoio: {e}. "
+                f"O pacote sai com o instrumental normal."
+            )
+
     debug_log(f"Convertendo áudio final para .ogg (backtrack={backtrack}, transpose={transpose}, fonte={audio_src})")
     final_audio_dest = out_path / final_audio_name
     convert_audio(audio_src, final_audio_dest, audio_format=audio_format, pitch_semitones=transpose)
@@ -1099,6 +1144,7 @@ if __name__ == "__main__":
     parser.add_argument("--backtrack", action="store_true", help="Backtrack: o áudio do pacote é o INSTRUMENTAL (sem voz-guia), karaokê puro")
     parser.add_argument("--transpose", type=int, default=0, help="Transpõe o pacote N semitons (áudio via rubberband + pitches das notas). 0 = tom original")
     parser.add_argument("--yarg-export", action="store_true", help="Exporta também uma subpasta no layout do YARG (notes.txt + song.ini + stems song.ogg/vocals.ogg)")
+    parser.add_argument("--keep-harmonies", action="store_true", help="Mantém as vozes de apoio/harmonias no áudio do pacote (só a voz principal é removida). Custa uma separação a mais.")
     parser.add_argument("--whisper-model", default="auto",
                         choices=["auto", "medium", "large-v3", "large-v2", "small"],
                         help="Modelo de reconhecimento do alinhamento. auto = large-v3 em GPU com VRAM sobrando, senão medium")
@@ -1136,6 +1182,7 @@ if __name__ == "__main__":
             backtrack=args.backtrack,
             transpose=args.transpose,
             yarg_export=args.yarg_export,
+            keep_harmonies=args.keep_harmonies,
             mp4_export=args.mp4_export,
             whisper_model=args.whisper_model,
             romanize=args.romanize,

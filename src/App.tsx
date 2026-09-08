@@ -178,6 +178,7 @@ interface PersistedSettings {
   withStems: boolean;
   duet: boolean;
   backtrack: boolean;
+  keepHarmonies: boolean;
   yargExport: boolean;
   mp4Export: boolean;
   whisperModel: string;
@@ -311,6 +312,9 @@ function App() {
   const [withStems, setWithStems] = useState(saved.withStems ?? false);
   const [duet, setDuet] = useState(saved.duet ?? false);
   const [backtrack, setBacktrack] = useState(saved.backtrack ?? false);
+  // Devolve as vozes de apoio ao instrumental. Só vale com o backtrack
+  // ligado - é ele que faz o áudio do pacote ser o instrumental.
+  const [keepHarmonies, setKeepHarmonies] = useState(saved.keepHarmonies ?? false);
   const [yargExport, setYargExport] = useState(saved.yargExport ?? false);
   const [mp4Export, setMp4Export] = useState(saved.mp4Export ?? false);
   const [whisperModel, setWhisperModel] = useState<string>(saved.whisperModel ?? "auto");
@@ -420,9 +424,9 @@ function App() {
 
   // ------------------------------------------------ persistência leve
   useEffect(() => {
-    const settings: PersistedSettings = { sourceMode, language, outDir, withVideo, bgVideo, cleanWork, cleanExtras, withStems, duet, backtrack, yargExport, mp4Export, whisperModel, romanize, audioFormat, maxVideoResolution };
+    const settings: PersistedSettings = { sourceMode, language, outDir, withVideo, bgVideo, cleanWork, cleanExtras, withStems, duet, backtrack, keepHarmonies, yargExport, mp4Export, whisperModel, romanize, audioFormat, maxVideoResolution };
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-  }, [sourceMode, language, outDir, withVideo, bgVideo, cleanWork, cleanExtras, withStems, duet, backtrack, yargExport, mp4Export, whisperModel, romanize, audioFormat, maxVideoResolution]);
+  }, [sourceMode, language, outDir, withVideo, bgVideo, cleanWork, cleanExtras, withStems, duet, backtrack, keepHarmonies, yargExport, mp4Export, whisperModel, romanize, audioFormat, maxVideoResolution]);
 
   // ------------------------------------------------ SÓ EM DEV: preview de estado
   // Abre a UI num estado simulado sem precisar do backend Tauri, para inspecionar
@@ -918,6 +922,7 @@ function App() {
       withStems,
       duet,
       backtrack,
+      keepHarmonies: backtrack ? keepHarmonies : false,
       transpose: parseInt(transpose, 10) || 0,
       yargExport,
       mp4Export,
@@ -1735,6 +1740,16 @@ function App() {
             disabled={isRunning}
           />
           {t("backtrackLabel")}
+          <span className="tip-mark" aria-hidden="true">?</span>
+        </label>
+        <label className="checkbox-line" title={t("keepHarmoniesHint")}>
+          <input
+            type="checkbox"
+            checked={backtrack && keepHarmonies}
+            onChange={(e) => setKeepHarmonies(e.target.checked)}
+            disabled={isRunning || !backtrack}
+          />
+          {t("keepHarmoniesLabel")}
           <span className="tip-mark" aria-hidden="true">?</span>
         </label>
         <label className="checkbox-line" title={t("mp4ExportHint")}>

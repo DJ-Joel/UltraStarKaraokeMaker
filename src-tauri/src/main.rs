@@ -224,6 +224,12 @@ struct PipelineInput {
     /// YARG (notes.txt + song.ini + stems song.ogg/vocals.ogg). Opt-in.
     #[serde(default)]
     yarg_export: bool,
+    /// Manter as vozes de apoio/harmonias no áudio do pacote: um segundo
+    /// modelo separa voz principal de apoio, e só o apoio volta pro
+    /// instrumental. Opt-in (custa uma separação a mais) e só faz sentido
+    /// junto do backtrack, que é quem escolhe o instrumental como áudio.
+    #[serde(default)]
+    keep_harmonies: bool,
     /// Vídeo de karaokê: além do pacote UltraStar, renderiza um .mp4 com a
     /// letra sincronizada gravada por cima do fundo, para tocar em TV/telefone
     /// sem o jogo. Opt-in (é o passo mais lento depois da IA).
@@ -608,6 +614,7 @@ async fn run_pipeline(
         "backtrack": input.backtrack,
         "transpose": input.transpose,
         "yarg_export": input.yarg_export,
+        "keep_harmonies": input.keep_harmonies,
         "mp4_export": input.mp4_export,
         "whisper_model": input.whisper_model,
         "romanize": input.romanize,

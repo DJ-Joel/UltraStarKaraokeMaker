@@ -15,6 +15,7 @@ PROTOCOLO
      "language":..., "out_dir":..., "bpm":..., "gap_ms":..., "device":...,
      "with_video":..., "bg_video":..., "bg_video_url":..., "clean_work":...,
      "with_stems":..., "duet":..., "backtrack":..., "transpose":..., "yarg_export":...,
+#      "keep_harmonies":...,
      "mp4_export":..., "romanize":...,
      "synced_lyrics_path":..., "audio_format":..., "max_video_resolution":...}
     {"cmd":"shutdown"}  -> encerra o servidor.
@@ -117,6 +118,7 @@ def _run_one(job: dict) -> None:
                     backtrack=job.get("backtrack", False),
                     transpose=job.get("transpose", 0),
                     yarg_export=job.get("yarg_export", False),
+                    keep_harmonies=job.get("keep_harmonies", False),
                     mp4_export=job.get("mp4_export", _mp4_export_fallback()),
                     whisper_model=job.get("whisper_model", "auto"),
                     romanize=job.get("romanize", False),
