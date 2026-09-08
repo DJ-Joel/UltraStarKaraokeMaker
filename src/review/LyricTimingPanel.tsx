@@ -22,6 +22,9 @@ interface Props {
   /** Raw text typed per .lrc line index - kept by the parent so it survives closing. */
   corrections: Record<number, string>;
   onCorrectionChange: (lrcIndex: number, raw: string) => void;
+  /** Lines the user has already ruled on - by .lrc line index. */
+  settled: ReadonlySet<number>;
+  onToggleSettled: (lrcIndex: number, value: boolean) => void;
   /** Seek the review player to this second (already offset by the caller). */
   onPlayFrom: (sec: number) => void;
   /** Stop playback - the play buttons double as stop buttons. */
@@ -56,6 +59,8 @@ export default function LyricTimingPanel({
   rows,
   corrections,
   onCorrectionChange,
+  settled,
+  onToggleSettled,
   onPlayFrom,
   onPause,
   isPlaying,
@@ -87,17 +92,20 @@ export default function LyricTimingPanel({
   };
   const isStop = (key: string) => activeKey === key && isPlaying;
 
+  // Uma linha só pede atenção enquanto o usuário não decidiu sobre ela. Sem
+  // isto, uma linha resolvida (tempo digitado, ou ouvida e marcada como certa)
+  // continuaria marcada para sempre - e depois de aprovar, TODAS continuariam,
+  // porque a IA passa a não ter opinião própria sobre os inícios de linha.
+  const needsCheck = (r: TimingRow) => r.suspect && !settled.has(r.lrcIndex);
   const suspectCount = useMemo(
-    () => rows.filter((r) => r.suspect).length,
-    [rows]
+    () => rows.filter(needsCheck).length,
+    [rows, settled]
   );
-  const typedCount = useMemo(
-    () =>
-      Object.values(corrections).filter((v) => parseTimeInput(v) !== null)
-        .length,
-    [corrections]
+  const settledCount = useMemo(
+    () => rows.filter((r) => settled.has(r.lrcIndex)).length,
+    [rows, settled]
   );
-  const shown = onlySuspect ? rows.filter((r) => r.suspect) : rows;
+  const shown = onlySuspect ? rows.filter(needsCheck) : rows;
 
   const audioMismatch =
     approvedAudioSeconds !== null &&
@@ -133,8 +141,8 @@ export default function LyricTimingPanel({
               total: String(rows.length),
               suspect: String(suspectCount),
             })}
-            {typedCount > 0
-              ? ` · ${t("ltTypedCount", { n: String(typedCount) })}`
+            {settledCount > 0
+              ? ` · ${t("ltSettledCount", { n: String(settledCount) })}`
               : ""}
           </span>
           <label className="lt-filter">
@@ -157,6 +165,7 @@ export default function LyricTimingPanel({
                 <th>{t("ltColGap")}</th>
                 <th>{t("ltColText")}</th>
                 <th>{t("ltColFix")}</th>
+                <th className="lt-done">{t("ltColDone")}</th>
               </tr>
             </thead>
             <tbody>
@@ -164,10 +173,18 @@ export default function LyricTimingPanel({
                 const raw = corrections[r.lrcIndex] ?? "";
                 const parsed = parseTimeInput(raw);
                 const bad = raw.trim() !== "" && parsed === null;
+                const isSettled = settled.has(r.lrcIndex);
+                const flag = needsCheck(r);
                 return (
                   <tr
                     key={r.lrcIndex}
-                    className={r.suspect ? "lt-row suspect" : "lt-row"}
+                    className={
+                      flag
+                        ? "lt-row suspect"
+                        : isSettled
+                          ? "lt-row settled"
+                          : "lt-row"
+                    }
                   >
                     <td className="lt-num">{r.lrcIndex + 1}</td>
                     <td>
@@ -218,13 +235,20 @@ export default function LyricTimingPanel({
                         </button>
                       )}
                     </td>
-                    <td className={r.suspect ? "lt-gap suspect" : "lt-gap"}>
+                    <td className={flag ? "lt-gap suspect" : "lt-gap"}>
                       {r.verseIndex === null ? (
                         <span title={t("ltUnmatchedHint")}>{t("ltUnmatched")}</span>
                       ) : r.gap === null ? (
                         <span title={t("ltNoMeasureHint")}>{t("ltNoMeasure")}</span>
                       ) : (
-                        formatGap(r.gap, comma)
+                        <>
+                          {formatGap(r.gap, comma)}
+                          {r.lineStartSeeded && (
+                            <span className="lt-seeded" title={t("ltSeededHint")}>
+                              {t("ltSeededMark")}
+                            </span>
+                          )}
+                        </>
                       )}
                     </td>
                     <td className="lt-text">{r.lrcText}</td>
@@ -243,6 +267,16 @@ export default function LyricTimingPanel({
                       {parsed !== null && (
                         <span className="lt-fix-echo">{formatTime(parsed)}</span>
                       )}
+                    </td>
+                    <td className="lt-done">
+                      <input
+                        type="checkbox"
+                        checked={isSettled}
+                        title={t("ltDoneHint")}
+                        onChange={(e) =>
+                          onToggleSettled(r.lrcIndex, e.target.checked)
+                        }
+                      />
                     </td>
                   </tr>
                 );

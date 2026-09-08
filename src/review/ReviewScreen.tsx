@@ -4,6 +4,7 @@ import { ask } from "@tauri-apps/api/dialog";
 import { useI18n } from "../i18n";
 import LyricTimingPanel from "./LyricTimingPanel";
 import {
+  approvedSettledForRows,
   approvedTimesForRows,
   buildTimingRows,
   formatTimeExact,
@@ -253,6 +254,9 @@ export default function ReviewScreen({ outDir, onClose, onSendToForm }: Props) {
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
   const [showTiming, setShowTiming] = useState(false);
   const [lyricFixes, setLyricFixes] = useState<Record<number, string>>({});
+  // Linhas já resolvidas pelo usuário (índice da linha no .lrc): tempo
+  // digitado, ou ouvida e marcada como certa. Param de ser cobradas.
+  const [settledLines, setSettledLines] = useState<Set<number>>(new Set());
   // Versão aprovada desta música na biblioteca (%LOCALAPPDATA%\USKMaker\
   // approved-lyrics), se já existir - null = ainda não aprovada.
   const [approvedText, setApprovedText] = useState<string | null>(null);
@@ -894,9 +898,32 @@ export default function ReviewScreen({ outDir, onClose, onSendToForm }: Props) {
     );
   }, [song, syncedLyrics, verses]);
   const timingSuspectCount = useMemo(
-    () => timingRows.filter((r) => r.suspect).length,
-    [timingRows]
+    () => timingRows.filter((r) => r.suspect && !settledLines.has(r.lrcIndex)).length,
+    [timingRows, settledLines]
   );
+
+  const toggleSettled = useCallback((lrcIndex: number, value: boolean) => {
+    setSettledLines((prev) => {
+      const next = new Set(prev);
+      if (value) next.add(lrcIndex);
+      else next.delete(lrcIndex);
+      return next;
+    });
+  }, []);
+
+  // Digitar um tempo válido JÁ é uma decisão sobre a linha - não faz sentido
+  // pedir para o usuário marcar a caixinha depois de corrigir o tempo.
+  const handleCorrectionChange = useCallback((lrcIndex: number, raw: string) => {
+    setLyricFixes((prev) => ({ ...prev, [lrcIndex]: raw }));
+    if (parseTimeInput(raw) !== null) {
+      setSettledLines((prev) => {
+        if (prev.has(lrcIndex)) return prev;
+        const next = new Set(prev);
+        next.add(lrcIndex);
+        return next;
+      });
+    }
+  }, []);
 
   // Preenche a coluna "tempo correto" com o que já foi aprovado antes, só
   // onde o tempo aprovado DIFERE do .lrc do pacote - assim a tabela continua
@@ -917,6 +944,19 @@ export default function ReviewScreen({ outDir, onClose, onSendToForm }: Props) {
       }
       return changed ? next : prev;
     });
+    setSettledLines((prev) => {
+      const marks = approvedSettledForRows(approvedText, timingRows);
+      if (marks.size === 0) return prev;
+      const next = new Set(prev);
+      let changed = false;
+      marks.forEach((idx) => {
+        if (!next.has(idx)) {
+          next.add(idx);
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
   }, [approvedText, timingRows]);
 
   // Duração do áudio conferido quando a aprovação foi salva, se houver.
@@ -935,10 +975,16 @@ export default function ReviewScreen({ outDir, onClose, onSendToForm }: Props) {
         const typed = parseTimeInput(lyricFixes[r.lrcIndex] ?? "");
         return { time: typed ?? r.lrcTime, text: r.lrcText };
       });
+      // Posições DENTRO de `lines` (mesma ordem das linhas da tabela) - é
+      // assim que o arquivo grava quais o usuário já resolveu.
+      const settled = timingRows
+        .map((r, i) => (settledLines.has(r.lrcIndex) ? i : -1))
+        .filter((i) => i >= 0);
       const path = await invoke<string>("save_approved_lyrics", {
         artist: s0.artist,
         title: s0.title,
         lines,
+        settled,
         audioSeconds: peaksRef.current?.duration ?? 0,
         lang,
       });
@@ -956,7 +1002,7 @@ export default function ReviewScreen({ outDir, onClose, onSendToForm }: Props) {
     } finally {
       setSavingApproved(false);
     }
-  }, [timingRows, lyricFixes, lang, t]);
+  }, [timingRows, lyricFixes, settledLines, lang, t]);
   const versesRef = useRef<Verse[]>([]);
   versesRef.current = verses;
 
@@ -2118,9 +2164,9 @@ export default function ReviewScreen({ outDir, onClose, onSendToForm }: Props) {
         <LyricTimingPanel
           rows={timingRows}
           corrections={lyricFixes}
-          onCorrectionChange={(idx, raw) =>
-            setLyricFixes((prev) => ({ ...prev, [idx]: raw }))
-          }
+          onCorrectionChange={handleCorrectionChange}
+          settled={settledLines}
+          onToggleSettled={toggleSettled}
           onPlayFrom={playFrom}
           onPause={pausePlayback}
           isPlaying={playing}

@@ -1376,6 +1376,26 @@ body { overflow: hidden; }
 .lt-fix.bad {
   border-color: #b4553f;
 }
+.lt-row.settled {
+  background: rgba(143, 191, 143, 0.07);
+}
+.lt-done {
+  width: 3.2rem;
+  text-align: center;
+}
+.lt-done input[type="checkbox"] {
+  cursor: pointer;
+}
+.lt-seeded {
+  margin-left: 0.4rem;
+  font-size: 0.72rem;
+  font-weight: 400;
+  color: #7a7a8a;
+  border: 1px solid #33333f;
+  border-radius: 4px;
+  padding: 0.05rem 0.28rem;
+  white-space: nowrap;
+}
 .lt-fix-echo {
   margin-left: 0.4rem;
   color: #7a7a8a;

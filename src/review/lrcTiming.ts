@@ -42,8 +42,21 @@ export interface TimingRow {
   heardSource: string | null;
   /** heardTime - lrcTime (positive = the AI heard it after the .lrc). */
   gap: number | null;
-  /** true when the line is worth checking by ear. */
+  /**
+   * true when the .lrc and the measurement disagree. NOT the same as "needs
+   * your attention": a line you have already ruled on is settled, and the
+   * caller filters those out.
+   */
   suspect: boolean;
+  /**
+   * true when this line's FIRST note came from the .lrc rather than from the
+   * audio - which is what happens to every line once an approved file is in
+   * use. The AI then has no independent opinion of where the line starts, and
+   * `heardTime` is the first word it measured INSIDE the line, not a rival
+   * reading of the start. Shown so the number is not mistaken for the AI
+   * contradicting a time the user set.
+   */
+  lineStartSeeded: boolean;
 }
 
 /**
@@ -56,6 +69,9 @@ export const SUSPECT_GAP_S = 1.5;
 
 /** Sources that mean a real measurement of the audio - not a guess, not .lrc. */
 const MEASURED_SOURCES = new Set(["anchor", "fuzzy", "realign"]);
+
+/** The source a note carries when its time came from the synced lyrics. */
+const SEEDED_SOURCE = "lrc";
 
 const LRC_TS_RE = /\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]/g;
 
@@ -174,8 +190,10 @@ export function buildTimingRows(
     const verseIndex = matched[k];
     let heardTime: number | null = null;
     let heardSource: string | null = null;
+    let lineStartSeeded = false;
     if (verseIndex !== null && ranges[verseIndex]) {
       const [from, to] = ranges[verseIndex];
+      lineStartSeeded = notes[from]?.source === SEEDED_SOURCE;
       for (let n = from; n < to; n++) {
         const note = notes[n];
         if (!note) continue;
@@ -198,6 +216,7 @@ export function buildTimingRows(
       heardSource,
       gap,
       suspect,
+      lineStartSeeded,
     };
   });
 }
@@ -247,9 +266,47 @@ export function isApprovedLrc(text: string): boolean {
  * against - if the user later downloads a different version of the track, the
  * approved times no longer describe it, and the panel says so.
  */
-export function parseApprovedMeta(text: string): { audioSeconds: number | null } {
+export function parseApprovedMeta(text: string): {
+  audioSeconds: number | null;
+  settled: number[];
+} {
   const m = /\[uskmaudio:([0-9]+(?:\.[0-9]+)?)\]/i.exec(text);
-  return { audioSeconds: m ? parseFloat(m[1]) : null };
+  const st = /\[uskmsettled:([0-9,\s]*)\]/i.exec(text);
+  const settled = st
+    ? st[1]
+        .split(",")
+        .map((piece) => parseInt(piece.trim(), 10))
+        .filter((n) => Number.isInteger(n) && n >= 0)
+    : [];
+  return { audioSeconds: m ? parseFloat(m[1]) : null, settled };
+}
+
+/**
+ * Which table rows the user has already ruled on, read back from an approved
+ * file. Matched by TEXT, exactly like approvedTimesForRows - the settled marks
+ * must travel with their line, not with a row number.
+ */
+export function approvedSettledForRows(
+  approvedText: string,
+  rows: TimingRow[]
+): Set<number> {
+  const out = new Set<number>();
+  const { settled } = parseApprovedMeta(approvedText);
+  if (settled.length === 0 || rows.length === 0) return out;
+  const approved = parseLrc(approvedText);
+  if (approved.length === 0) return out;
+  const matched = matchInOrder(
+    rows.map((r) => normalizeLine(r.lrcText)),
+    approved.map((l) => normalizeLine(l.text))
+  );
+  const settledSet = new Set(settled);
+  approved.forEach((_, k) => {
+    if (!settledSet.has(k)) return;
+    const rowPos = matched[k];
+    if (rowPos === null) return;
+    out.add(rows[rowPos].lrcIndex);
+  });
+  return out;
 }
 
 /**

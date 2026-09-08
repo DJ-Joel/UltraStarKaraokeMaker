@@ -1041,6 +1041,11 @@ fn save_approved_lyrics(
     artist: String,
     title: String,
     lines: Vec<ApprovedLine>,
+    // Índices (em `lines`) das linhas que o usuário JÁ RESOLVEU - digitou o
+    // tempo certo ou ouviu e marcou como correta. Voltam no arquivo para a
+    // tabela parar de cobrar o que já foi decidido. (Comentário simples: o
+    // Rust não aceita /// em parâmetro de função.)
+    settled: Vec<usize>,
     audio_seconds: f64,
     lang: String,
 ) -> Result<String, String> {
@@ -1060,6 +1065,13 @@ fn save_approved_lyrics(
     // que não valem mais para aquele arquivo.
     out.push_str("[uskmapproved:1]\n");
     out.push_str(&format!("[uskmaudio:{:.2}]\n", audio_seconds.max(0.0)));
+    if !settled.is_empty() {
+        let mut marks: Vec<usize> = settled.into_iter().filter(|i| *i < lines.len()).collect();
+        marks.sort_unstable();
+        marks.dedup();
+        let joined: Vec<String> = marks.iter().map(|i| i.to_string()).collect();
+        out.push_str(&format!("[uskmsettled:{}]\n", joined.join(",")));
+    }
     for line in &lines {
         out.push_str(&lrc_stamp(line.time));
         out.push_str(line.text.trim());
