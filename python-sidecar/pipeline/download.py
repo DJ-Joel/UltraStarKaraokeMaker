@@ -248,7 +248,17 @@ def download_from_youtube_with_video(url: str, out_dir: Path, max_resolution: in
     ]
     run_yt_dlp(cmd, "o vídeo")
 
-    video_candidates = list(out_dir.glob("video.*"))
+    # SÓ containers de vídeo entram aqui. O .wav extraído logo abaixo é
+    # escrito NESTA pasta com o mesmo prefixo "video." - e numa SEGUNDA
+    # geração na mesma pasta (intermediários mantidos, "Gerar de novo") ele
+    # é o "video.*" mais recente, porque o yt-dlp nem toca no .mp4 que já
+    # estava baixado. O caminho do vídeo virava então o próprio .wav, e o
+    # ffmpeg recebia a mesma coisa como entrada E saída:
+    #   "Output ... same as Input #0 - exiting / cannot edit files in-place"
+    # Bug real relatado pelo usuário em 08/09/2026.
+    video_candidates = [
+        p for p in out_dir.glob("video.*") if p.suffix.lower() != ".wav"
+    ]
     if not video_candidates:
         raise RuntimeError("yt-dlp rodou mas nenhum vídeo foi encontrado em " + str(out_dir))
     video_path = max(video_candidates, key=lambda p: p.stat().st_mtime)
